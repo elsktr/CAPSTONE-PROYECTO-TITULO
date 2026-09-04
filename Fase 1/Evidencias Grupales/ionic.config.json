@@ -1,0 +1,7 @@
+{
+  "name": "cuervo-negro-ionic",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular"
+}
