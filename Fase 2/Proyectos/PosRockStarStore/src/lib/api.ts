@@ -11,6 +11,18 @@
 // Base de la API: misma origen en Docker, localhost en dev.
 const BASE = import.meta.env.VITE_API_URL ?? '/api/v1';
 
+/** Rechazo de la API: `{ codigo, mensaje, detalle }`. El codigo permite reaccionar a casos puntuales. */
+export class ErrorApi extends Error {
+  constructor(
+    mensaje: string,
+    readonly status: number,
+    readonly codigo?: string,
+    readonly detalle?: unknown,
+  ) {
+    super(mensaje);
+  }
+}
+
 async function leerJson(res: Response) {
   const texto = await res.text();
   let cuerpo: unknown = null;
@@ -20,11 +32,17 @@ async function leerJson(res: Response) {
     cuerpo = { mensaje: texto };
   }
   if (!res.ok) {
-    const mensaje =
-      typeof cuerpo === 'object' && cuerpo !== null && 'mensaje' in cuerpo
-        ? String((cuerpo as { mensaje: unknown }).mensaje)
-        : `Error ${res.status}`;
-    throw new Error(mensaje);
+    const error = (typeof cuerpo === 'object' && cuerpo !== null ? cuerpo : {}) as {
+      codigo?: unknown;
+      mensaje?: unknown;
+      detalle?: unknown;
+    };
+    throw new ErrorApi(
+      error.mensaje !== undefined ? String(error.mensaje) : `Error ${res.status}`,
+      res.status,
+      typeof error.codigo === 'string' ? error.codigo : undefined,
+      error.detalle,
+    );
   }
   return cuerpo;
 }
@@ -144,59 +162,62 @@ export async function buscarVariantes(
   return (await leerJson(res)) as VarianteGestion[];
 }
 
-export interface DatosDespacho {
-  tipo: 'retiro';
-  comuna: string;
-  direccion: string;
-  referencia?: string;
-}
+/**
+ * Medios con que se cobra en la tienda. La tarjeta se pasa por el terminal fisico:
+ * el POS solo registra el medio, no hay pasarela (Webpay es solo de la tienda web).
+ */
+export type MedioPresencial = 'EFECTIVO' | 'DEBITO_PRESENCIAL' | 'CREDITO_PRESENCIAL';
 
-export interface LineaCheckout {
+export interface LineaVentaPos {
   idVariante: number;
   cantidad: number;
+  /** Lo que falte en la sala de ventas se retira de bodega. */
+  permitirBodega?: boolean;
 }
 
-export interface CheckoutRequest {
+export interface VentaPosRequest {
+  /** UUID por venta: reenviarlo no crea otra venta. */
   claveIdempotencia: string;
-  lineas: LineaCheckout[];
-  despacho: DatosDespacho;
+  lineas: LineaVentaPos[];
+  medioPago: MedioPresencial;
+  idCliente?: number;
 }
 
-export interface CheckoutResponse {
-  idVenta: number;
+/** Detalle del rechazo EXISTENCIA_EN_BODEGA: lineas que la sala no alcanza. */
+export interface LineaEnBodega {
+  idVariante: number;
+  producto: string;
+  talla: string;
+  enSala: number;
+  enBodega: number;
+}
+
+export interface LineaComprobantePos {
+  idVariante: number;
+  sku: string;
+  producto: string;
+  talla: string;
+  color: string;
+  cantidad: number;
+  precioUnitario: number;
   subtotal: number;
-  flete: number;
-  total: number;
-  tokenPago: string;
-  expiraEn: string;
+  ubicacion: 'BODEGA' | 'SALA_VENTAS';
 }
 
-export interface RetornoPagoRequest {
-  tokenPago: string;
-  aprobar?: boolean;
-}
-
-export interface RetornoPagoResponse {
-  estado: string;
-  idVenta: number;
-  total: number;
-  idPedido?: number;
-  motivo?: string;
-}
-
-export interface VentaPendiente {
+/** Comprobante interno de una venta POS (sin validez tributaria). */
+export interface ComprobantePos {
   idVenta: number;
   fecha: string;
+  vendedor: string;
+  cliente: string | null;
+  medioPago: { codigo: MedioPresencial; nombre: string };
+  lineas: LineaComprobantePos[];
   total: number;
-  medioPago: string;
-  estado: string;
 }
 
-export async function crearCheckout(
-  accessToken: string,
-  datos: CheckoutRequest
-): Promise<CheckoutResponse> {
-  const res = await fetch(`${BASE}/ventas/checkout`, {
+/** POST /ventas/pos (VENDEDOR): registra la venta, descuenta stock y devuelve el comprobante. */
+export async function registrarVentaPos(accessToken: string, datos: VentaPosRequest): Promise<ComprobantePos> {
+  const res = await fetch(`${BASE}/ventas/pos`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -204,27 +225,13 @@ export async function crearCheckout(
     },
     body: JSON.stringify(datos),
   });
-  return (await leerJson(res)) as CheckoutResponse;
+  return (await leerJson(res)) as ComprobantePos;
 }
 
-export async function retornoPago(
-  accessToken: string,
-  datos: RetornoPagoRequest
-): Promise<RetornoPagoResponse> {
-  const res = await fetch(`${BASE}/pagos/webpay/retorno`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(datos),
-  });
-  return (await leerJson(res)) as RetornoPagoResponse;
-}
-
-export async function getPendientes(accessToken: string): Promise<VentaPendiente[]> {
-  const res = await fetch(`${BASE}/ventas/pendientes`, {
+/** GET /ventas/pos: ventas POS del dia del vendedor, de la mas reciente a la mas antigua. */
+export async function getVentasPos(accessToken: string): Promise<ComprobantePos[]> {
+  const res = await fetch(`${BASE}/ventas/pos`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  return (await leerJson(res)) as VentaPendiente[];
+  return (await leerJson(res)) as ComprobantePos[];
 }

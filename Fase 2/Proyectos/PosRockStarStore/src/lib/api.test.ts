@@ -137,33 +137,37 @@ describe('api client', () => {
     });
   });
 
-  describe('crearCheckout', () => {
-    it('creates checkout with idempotency key and client token', async () => {
-      const mockResponse = {
-        idVenta: 100,
-        subtotal: 30000,
-        flete: 0,
-        total: 30000,
-        tokenPago: 'payment-token-123',
-        expiraEn: '2024-12-31T23:59:59Z',
-      };
+  describe('registrarVentaPos', () => {
+    const comprobante = {
+      idVenta: 100,
+      fecha: '2024-01-15T10:30:00.000Z',
+      vendedor: 'Vendedor Demo',
+      cliente: null,
+      medioPago: { codigo: 'EFECTIVO', nombre: 'Efectivo' },
+      lineas: [
+        { idVariante: 1, sku: 'RS-0001', producto: 'Polera', talla: 'M', color: 'Negro', cantidad: 2, precioUnitario: 15000, subtotal: 30000, ubicacion: 'SALA_VENTAS' },
+      ],
+      total: 30000,
+    };
+
+    it('registra la venta con la clave de idempotencia y el token del vendedor', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        text: async () => JSON.stringify(mockResponse),
+        text: async () => JSON.stringify(comprobante),
       });
       const request = {
         claveIdempotencia: 'uuid-123',
         lineas: [{ idVariante: 1, cantidad: 2 }],
-        despacho: { tipo: 'retiro' as const, comuna: 'Santiago', direccion: 'Av. Principal 123' },
+        medioPago: 'EFECTIVO' as const,
       };
-      const result = await api.crearCheckout('client-token', request);
-      expect(result).toEqual(mockResponse);
+      const result = await api.registrarVentaPos('vendor-token', request);
+      expect(result).toEqual(comprobante);
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/ventas/checkout'),
+        expect.stringContaining('/ventas/pos'),
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
-            Authorization: 'Bearer client-token',
+            Authorization: 'Bearer vendor-token',
             'Content-Type': 'application/json',
           }),
           body: JSON.stringify(request),
@@ -171,51 +175,34 @@ describe('api client', () => {
       );
     });
 
-    it('throws on stock insufficient error', async () => {
+    it('entrega el codigo y el detalle del rechazo para ofrecer el retiro desde bodega', async () => {
+      const detalle = [{ idVariante: 1, producto: 'Polera', talla: 'M', enSala: 0, enBodega: 5 }];
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 409,
-        text: async () => JSON.stringify({ mensaje: 'Stock insuficiente para variante 1' }),
+        text: async () => JSON.stringify({ codigo: 'EXISTENCIA_EN_BODEGA', mensaje: 'Hay que retirarla de bodega.', detalle }),
       });
-      await expect(
-        api.crearCheckout('client-token', {
-          claveIdempotencia: 'uuid-123',
-          lineas: [{ idVariante: 1, cantidad: 999 }],
-          despacho: { tipo: 'retiro', comuna: 'Santiago', direccion: 'Av. Principal 123' },
-        })
-      ).rejects.toThrow('Stock insuficiente');
+      const error = await api
+        .registrarVentaPos('vendor-token', { claveIdempotencia: 'uuid-123', lineas: [{ idVariante: 1, cantidad: 1 }], medioPago: 'EFECTIVO' })
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(api.ErrorApi);
+      expect(error).toMatchObject({ status: 409, codigo: 'EXISTENCIA_EN_BODEGA', detalle, message: 'Hay que retirarla de bodega.' });
     });
   });
 
-  describe('retornoPago', () => {
-    it('approves payment immediately for contado', async () => {
-      const mockResponse = {
-        estado: 'aprobado',
-        idVenta: 100,
-        total: 30000,
-        idPedido: 50,
-      };
+  describe('getVentasPos', () => {
+    it('devuelve las ventas del dia con el token del vendedor', async () => {
+      const ventas = [{ idVenta: 100, total: 30000 }];
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        text: async () => JSON.stringify(mockResponse),
+        text: async () => JSON.stringify(ventas),
       });
-      const result = await api.retornoPago('client-token', { tokenPago: 'payment-token-123', aprobar: true });
-      expect(result).toEqual(mockResponse);
-    });
-
-    it('returns rejection with motivo for tarjeta rechazada', async () => {
-      const mockResponse = {
-        estado: 'rechazado',
-        idVenta: 100,
-        total: 30000,
-        motivo: 'Tarjeta rechazada por el banco',
-      };
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: async () => JSON.stringify(mockResponse),
-      });
-      const result = await api.retornoPago('client-token', { tokenPago: 'payment-token-123', aprobar: false });
-      expect(result).toEqual(mockResponse);
+      const result = await api.getVentasPos('vendor-token');
+      expect(result).toEqual(ventas);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/ventas/pos'),
+        expect.objectContaining({ headers: { Authorization: 'Bearer vendor-token' } })
+      );
     });
   });
 
@@ -235,21 +222,6 @@ describe('api client', () => {
     it('devuelve null sin imagen para mostrar placeholder', () => {
       expect(api.getImageUrl({ imagenUrl: null })).toBeNull();
       expect(api.getImageUrl({ imagenUrl: '   ' })).toBeNull();
-    });
-  });
-
-  describe('getPendientes', () => {
-    it('returns pending sales with client token', async () => {
-      const mockPendientes = [
-        { idVenta: 100, fecha: '2024-01-15T10:30:00Z', total: 30000, medioPago: 'contado', estado: 'pagado' },
-        { idVenta: 101, fecha: '2024-01-15T11:00:00Z', total: 15000, medioPago: 'tarjeta', estado: 'pendiente' },
-      ];
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: async () => JSON.stringify(mockPendientes),
-      });
-      const result = await api.getPendientes('client-token');
-      expect(result).toEqual(mockPendientes);
     });
   });
 });

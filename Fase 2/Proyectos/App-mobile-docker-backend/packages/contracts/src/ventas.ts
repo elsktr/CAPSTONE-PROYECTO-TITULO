@@ -1,3 +1,4 @@
+import type { Ubicacion } from './inventario';
 import type { LineaPedidoCliente } from './logistica';
 
 /** Datos del destino de una compra web. */
@@ -84,4 +85,61 @@ export interface CompraPendiente extends CheckoutResponse {
   direccion: string;
   comuna: string;
   region: string;
+}
+
+// --- Venta en tienda (POS) ---
+
+/** Medios con que se cobra en la tienda. La tarjeta se pasa por el terminal físico: el POS solo registra el medio. */
+export type MedioPresencial = 'EFECTIVO' | 'DEBITO_PRESENCIAL' | 'CREDITO_PRESENCIAL';
+
+export interface LineaVentaPos {
+  idVariante: number;
+  cantidad: number;
+  /**
+   * La venta sale de la sala de ventas. Con `true`, lo que falte en sala se retira de
+   * bodega; sin él, una línea que la sala no alcanza se rechaza con `EXISTENCIA_EN_BODEGA`.
+   */
+  permitirBodega?: boolean;
+}
+
+/**
+ * POST /ventas/pos (Vendedor)
+ *
+ * Registra la venta, descuenta el stock y emite el comprobante, todo de una vez: el
+ * comprador se lleva la prenda. Sin flete ni despacho. Reenviar la misma clave responde
+ * el comprobante ya emitido.
+ */
+export interface VentaPosRequest {
+  /** UUID generado por el POS; reenviar la misma clave no crea otra venta. */
+  claveIdempotencia: string;
+  lineas: LineaVentaPos[];
+  medioPago: MedioPresencial;
+  /** Cliente identificado en el mostrador, si lo hay. */
+  idCliente?: number;
+}
+
+/** Detalle de un rechazo `EXISTENCIA_EN_BODEGA`: líneas que se pueden vender retirándolas de bodega. */
+export interface LineaEnBodega {
+  idVariante: number;
+  producto: string;
+  talla: string;
+  enSala: number;
+  enBodega: number;
+}
+
+export interface LineaComprobantePos extends LineaPedidoCliente {
+  /** De dónde salieron las unidades. Una línea repartida entre sala y bodega aparece dos veces. */
+  ubicacion: Ubicacion;
+  subtotal: number;
+}
+
+/** Comprobante interno de una venta POS; sin validez tributaria. También GET /ventas/pos (Vendedor: las suyas; Gerente: todas). */
+export interface ComprobantePos {
+  idVenta: number;
+  fecha: string;
+  vendedor: string;
+  cliente: string | null;
+  medioPago: { codigo: MedioPresencial; nombre: string };
+  lineas: LineaComprobantePos[];
+  total: number;
 }

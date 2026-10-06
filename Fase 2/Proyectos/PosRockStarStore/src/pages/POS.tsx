@@ -26,12 +26,19 @@ import {
   IonRadioGroup,
 } from '@ionic/react';
 import { useAuth } from '../contexts/AuthContext';
-import { getCatalogo, ArticuloCatalogo, crearCheckout, retornoPago, CheckoutResponse, RetornoPagoResponse, VentaPendiente, getImageUrl } from '../lib/api';
+import { getCatalogo, ArticuloCatalogo, registrarVentaPos, getVentasPos, ComprobantePos, ErrorApi, LineaEnBodega, MedioPresencial, getImageUrl } from '../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { cartOutline, logOutOutline, refreshOutline, receiptOutline, addOutline, removeOutline, warningOutline, checkmarkCircleOutline, closeCircleOutline, cashOutline, cardOutline, printOutline, timeOutline, listOutline, homeOutline } from 'ionicons/icons';
 import { formatCLP } from '../utils/format';
 import { ProductImage } from '../components/ProductImage';
 import { EmptyState, ErrorAlert, SkeletonGrid } from '../components/FeedbackStates';
+
+/** La tarjeta se pasa por el terminal de la tienda; el POS solo registra con que se pago. */
+const MEDIOS_PAGO: { codigo: MedioPresencial; nombre: string; descripcion: string; icono: string }[] = [
+  { codigo: 'EFECTIVO', nombre: 'Efectivo', descripcion: 'Pago en caja', icono: cashOutline },
+  { codigo: 'DEBITO_PRESENCIAL', nombre: 'Tarjeta de débito', descripcion: 'Cobrar en el terminal de la tienda', icono: cardOutline },
+  { codigo: 'CREDITO_PRESENCIAL', nombre: 'Tarjeta de crédito', descripcion: 'Cobrar en el terminal de la tienda', icono: cardOutline },
+];
 
 const POS: React.FC = () => {
   const { vendedor, logout, cliente, setCliente } = useAuth();
@@ -52,14 +59,15 @@ const POS: React.FC = () => {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [showCheckoutError, setShowCheckoutError] = useState(false);
-  const [medioPago, setMedioPago] = useState<'contado' | 'tarjeta'>('contado');
+  const [medioPago, setMedioPago] = useState<MedioPresencial>('EFECTIVO');
   const [showMedioPagoModal, setShowMedioPagoModal] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState<string>('');
-  const [checkoutResponse, setCheckoutResponse] = useState<CheckoutResponse | null>(null);
-  
+  // Lineas que la sala de ventas no alcanza: se pide confirmar el retiro desde bodega.
+  const [lineasEnBodega, setLineasEnBodega] = useState<LineaEnBodega[] | null>(null);
+
   // Jornada register
   const [showRegistro, setShowRegistro] = useState(false);
-  const [registroVentas, setRegistroVentas] = useState<VentaPendiente[]>([]);
+  const [registroVentas, setRegistroVentas] = useState<ComprobantePos[]>([]);
   const [registroLoading, setRegistroLoading] = useState(false);
 
   const generateIdempotencyKey = useCallback(() => {
@@ -147,102 +155,85 @@ const POS: React.FC = () => {
     setShowMedioPagoModal(true);
   };
 
-  const procesarCheckout = async () => {
-    if (!cliente) return;
-    
+  /**
+   * Registra la venta en el backend: descuenta el stock y devuelve el comprobante. La
+   * tarjeta se cobra en el terminal de la tienda, asi que no hay pasarela que resolver.
+   * `desdeBodega` son las variantes que el vendedor acepto retirar de bodega.
+   */
+  const procesarVenta = async (desdeBodega: number[] = []) => {
+    if (!vendedor) return;
+
     setCheckoutLoading(true);
     setCheckoutError(null);
-    
-    const lineas = lineasCarrito.map(l => ({
-      idVariante: l.idVariante,
-      cantidad: l.cantidad,
-    }));
-    
-    const despacho = {
-      tipo: 'retiro' as const,
-      comuna: 'Santiago',
-      direccion: 'Av. Principal 123, Rockstar Store',
-      referencia: 'Retiro en tienda',
-    };
-    
+
     try {
-      const response = await crearCheckout(cliente.accessToken, {
+      const comprobante = await registrarVentaPos(vendedor.accessToken, {
         claveIdempotencia: idempotencyKey,
-        lineas,
-        despacho,
+        lineas: lineasCarrito.map(l => ({
+          idVariante: l.idVariante,
+          cantidad: l.cantidad,
+          permitirBodega: desdeBodega.includes(l.idVariante),
+        })),
+        medioPago,
+        idCliente: cliente?.usuario.id,
       });
-      setCheckoutResponse(response);
-      await procesarRetorno(response.tokenPago);
+      mostrarBoleta(comprobante);
+      setCarrito(new Map());
+      await cargarCatalogo();
+      await cargarRegistro();
     } catch (err) {
-      const mensaje = err instanceof Error ? err.message : 'Error en checkout';
-      if (mensaje.toLowerCase().includes('stock') || mensaje.toLowerCase().includes('insuficiente')) {
+      if (err instanceof ErrorApi && err.codigo === 'EXISTENCIA_EN_BODEGA') {
+        // La venta no se registro: se pide confirmar y se reenvia con la misma clave.
+        setLineasEnBodega(err.detalle as LineaEnBodega[]);
+        return;
+      }
+      const mensaje = err instanceof Error ? err.message : 'Error al registrar la venta';
+      if (err instanceof ErrorApi && err.codigo === 'STOCK_INSUFICIENTE') {
         setCheckoutError('Sin stock: ' + mensaje);
-        setShowCheckoutError(true);
         await cargarCatalogo();
       } else {
         setCheckoutError(mensaje);
-        setShowCheckoutError(true);
       }
+      setShowCheckoutError(true);
     } finally {
       setCheckoutLoading(false);
     }
   };
 
-  const procesarRetorno = async (tokenPago: string) => {
-    if (!cliente) return;
-    
-    try {
-      const aprobar = medioPago === 'contado';
-      const response = await retornoPago(cliente.accessToken, { tokenPago, aprobar });
-      
-      if (response.estado === 'aprobado' || response.estado === 'pagado') {
-        await mostrarBoleta(response);
-        setCarrito(new Map());
-        await cargarCatalogo();
-        await cargarRegistro();
-      } else if (response.estado === 'rechazado') {
-        setCheckoutError(`Pago rechazado: ${response.motivo || 'Tarjeta declinada'}`);
-        setShowCheckoutError(true);
-      } else if (response.estado === 'pendiente') {
-        setCheckoutError('Pago pendiente de confirmación');
-        setShowCheckoutError(true);
-      }
-    } catch (err) {
-      const mensaje = err instanceof Error ? err.message : 'Error en retorno de pago';
-      setCheckoutError(mensaje);
-      setShowCheckoutError(true);
-    }
+  const confirmarRetiroBodega = () => {
+    const ids = (lineasEnBodega ?? []).map(l => l.idVariante);
+    setLineasEnBodega(null);
+    procesarVenta(ids);
   };
 
+  // Reintentar usa la misma clave: si el primer envio alcanzo a registrarse, el backend
+  // responde esa venta en vez de crear otra.
   const reintentarCheckout = async () => {
-    if (!checkoutResponse) return;
-    await procesarRetorno(checkoutResponse.tokenPago);
+    await procesarVenta();
   };
 
-  const mostrarBoleta = async (retorno: RetornoPagoResponse) => {
-    const lineasBoleta = lineasCarrito.map(l => ({
-      producto: l.producto,
-      banda: l.banda,
-      color: l.color,
-      talla: l.talla,
-      cantidad: l.cantidad,
-      precioUnitario: l.precio,
-      subtotal: l.subtotal,
-    }));
-    
+  const mostrarBoleta = (comprobante: ComprobantePos) => {
     const boleta = {
-      idVenta: retorno.idVenta,
-      fecha: new Date().toLocaleString('es-CL'),
-      lineas: lineasBoleta,
-      subtotal: total,
-      flete: 0,
-      total: retorno.total,
-      medioPago: medioPago === 'contado' ? 'Efectivo' : 'Tarjeta (Webpay Simulado)',
+      idVenta: comprobante.idVenta,
+      fecha: new Date(comprobante.fecha).toLocaleString('es-CL'),
+      vendedor: comprobante.vendedor,
+      cliente: comprobante.cliente,
+      lineas: comprobante.lineas.map(l => ({
+        producto: l.producto,
+        color: l.color,
+        talla: l.talla,
+        cantidad: l.cantidad,
+        precioUnitario: l.precioUnitario,
+        subtotal: l.subtotal,
+        ubicacion: l.ubicacion,
+      })),
+      total: comprobante.total,
+      medioPago: comprobante.medioPago.nombre,
       giro: 'Rockstar Store SpA - Gira Musical y Merchandising',
       direccion: 'Av. Principal 123, Santiago, Chile',
       rut: '76.123.456-7',
     };
-    
+
     setBoletaData(boleta);
     setShowBoleta(true);
     setShowMedioPagoModal(false);
@@ -277,7 +268,8 @@ const POS: React.FC = () => {
         <div class="info">
           <p><strong>BOLETA DE VENTA</strong></p>
           <p>N° ${boletaData.idVenta} | ${boletaData.fecha}</p>
-          <p>Vendedor: ${vendedor?.usuario.nombre}</p>
+          <p>Vendedor: ${boletaData.vendedor}</p>
+          ${boletaData.cliente ? `<p>Cliente: ${boletaData.cliente}</p>` : ''}
         </div>
         <div class="lineas">
           ${boletaData.lineas.map((l: any) => `
@@ -288,13 +280,12 @@ const POS: React.FC = () => {
           `).join('')}
         </div>
         <div class="totales">
-          <div class="linea"><span>Subtotal</span><span>${formatCLP(boletaData.subtotal)}</span></div>
-          <div class="linea"><span>Flete</span><span>${formatCLP(boletaData.flete)}</span></div>
           <div class="linea total"><span>TOTAL</span><span>${formatCLP(boletaData.total)}</span></div>
           <div class="linea"><span>Medio de pago</span><span>${boletaData.medioPago}</span></div>
         </div>
         <div class="giro">
           <p>${boletaData.giro}</p>
+          <p>Comprobante interno, sin validez tributaria</p>
           <p>Gracias por su compra</p>
         </div>
         <button class="no-print" onclick="window.print()" style="margin-top:20px;padding:10px 20px;">Imprimir</button>
@@ -319,6 +310,8 @@ const POS: React.FC = () => {
       }
       setCliente(sesion);
       setShowClienteModal(false);
+      // Cada cobro lleva su propia clave, también cuando empieza identificando al cliente.
+      setIdempotencyKey(generateIdempotencyKey());
       setShowMedioPagoModal(true);
     } catch (err) {
       setClienteError(err instanceof Error ? err.message : 'Error al iniciar sesión');
@@ -332,12 +325,10 @@ const POS: React.FC = () => {
   };
 
   const cargarRegistro = async () => {
-    if (!cliente) return;
+    if (!vendedor) return;
     try {
       setRegistroLoading(true);
-      const { getPendientes } = await import('../lib/api');
-      const pendientes = await getPendientes(cliente.accessToken);
-      setRegistroVentas(pendientes);
+      setRegistroVentas(await getVentasPos(vendedor.accessToken));
     } catch (err) {
       console.error('Error cargando registro:', err);
     } finally {
@@ -347,7 +338,7 @@ const POS: React.FC = () => {
 
   const handleMedioPagoConfirmar = () => {
     setShowMedioPagoModal(false);
-    procesarCheckout();
+    procesarVenta();
   };
 
   if (loading) {
@@ -414,6 +405,23 @@ const POS: React.FC = () => {
           buttons={[
             { text: 'Reintentar', handler: () => reintentarCheckout() },
             'OK'
+          ]}
+        />
+
+        <IonAlert
+          isOpen={lineasEnBodega !== null}
+          onDidDismiss={() => setLineasEnBodega(null)}
+          header="Retirar desde bodega"
+          message={
+            'No alcanza en la sala de ventas: ' +
+            (lineasEnBodega ?? [])
+              .map(l => `${l.producto} talla ${l.talla} (sala ${l.enSala}, bodega ${l.enBodega})`)
+              .join('; ') +
+            '. ¿Retirar lo que falta desde bodega?'
+          }
+          buttons={[
+            { text: 'Cancelar', role: 'cancel' },
+            { text: 'Retirar de bodega', handler: () => confirmarRetiroBodega() },
           ]}
         />
 
@@ -572,30 +580,20 @@ const POS: React.FC = () => {
           <IonContent className="ion-padding">
             <IonRadioGroup value={medioPago} onIonChange={(e: any) => setMedioPago(e.detail.value)}>
               <IonList>
-                <IonItem>
-                  <IonRadio slot="start" value="contado" />
-                  <IonLabel>
-                    <div className="medio-pago-option">
-                      <IonIcon icon={cashOutline} slot="start" color="primary" />
-                      <div>
-                        <strong>Contado</strong>
-                        <p className="medio-pago-desc">Aprobación inmediata</p>
+                {MEDIOS_PAGO.map((medio) => (
+                  <IonItem key={medio.codigo}>
+                    <IonRadio slot="start" value={medio.codigo} />
+                    <IonLabel>
+                      <div className="medio-pago-option">
+                        <IonIcon icon={medio.icono} slot="start" color={medio.codigo === 'EFECTIVO' ? 'primary' : 'tertiary'} />
+                        <div>
+                          <strong>{medio.nombre}</strong>
+                          <p className="medio-pago-desc">{medio.descripcion}</p>
+                        </div>
                       </div>
-                    </div>
-                  </IonLabel>
-                </IonItem>
-                <IonItem>
-                  <IonRadio slot="start" value="tarjeta" />
-                  <IonLabel>
-                    <div className="medio-pago-option">
-                      <IonIcon icon={cardOutline} slot="start" color="tertiary" />
-                      <div>
-                        <strong>Tarjeta (Webpay Simulado)</strong>
-                        <p className="medio-pago-desc">Aprobar o simular rechazo</p>
-                      </div>
-                    </div>
-                  </IonLabel>
-                </IonItem>
+                    </IonLabel>
+                  </IonItem>
+                ))}
               </IonList>
             </IonRadioGroup>
             <IonButton expand="block" color="primary" onClick={handleMedioPagoConfirmar} disabled={checkoutLoading} className="mt-16">
@@ -636,7 +634,8 @@ const POS: React.FC = () => {
                 <div className="boleta-info">
                   <div><strong>Boleta N°</strong><span>{boletaData.idVenta}</span></div>
                   <div><strong>Fecha</strong><span>{boletaData.fecha}</span></div>
-                  <div><strong>Vendedor</strong><span>{vendedor?.usuario.nombre}</span></div>
+                  <div><strong>Vendedor</strong><span>{boletaData.vendedor}</span></div>
+                  {boletaData.cliente && <div><strong>Cliente</strong><span>{boletaData.cliente}</span></div>}
                   <div><strong>Medio de pago</strong><span>{boletaData.medioPago}</span></div>
                 </div>
                 <div className="boleta-lineas">
@@ -647,8 +646,8 @@ const POS: React.FC = () => {
                     <span>Subtotal</span>
                   </div>
                   {boletaData.lineas.map((l: any) => (
-                    <div key={l.producto + l.talla + l.color} className="boleta-linea">
-                      <span>{l.producto} ({l.talla}/{l.color})</span>
+                    <div key={l.producto + l.talla + l.color + l.ubicacion} className="boleta-linea">
+                      <span>{l.producto} ({l.talla}/{l.color}){l.ubicacion === 'BODEGA' && ' · bodega'}</span>
                       <span>{l.cantidad}</span>
                       <span>{formatCLP(l.precioUnitario)}</span>
                       <span>{formatCLP(l.subtotal)}</span>
@@ -656,12 +655,11 @@ const POS: React.FC = () => {
                   ))}
                 </div>
                 <div className="boleta-totales">
-                  <div className="linea"><span>Subtotal</span><span>{formatCLP(boletaData.subtotal)}</span></div>
-                  <div className="linea"><span>Flete</span><span>{formatCLP(boletaData.flete)}</span></div>
                   <div className="linea total"><span>TOTAL</span><span>{formatCLP(boletaData.total)}</span></div>
                 </div>
                 <div className="boleta-giro">
                   <p>{boletaData.giro}</p>
+                  <p className="boleta-no-tributaria">Comprobante interno, sin validez tributaria</p>
                   <p>Gracias por su compra</p>
                 </div>
               </>
@@ -703,14 +701,14 @@ const POS: React.FC = () => {
                   </div>
                   <div className="stat-card">
                     <div className="stat-value">
-                      {formatCLP(registroVentas.filter(v => v.estado === 'pagado').reduce((sum, v) => sum + v.total, 0))}
+                      {formatCLP(registroVentas.reduce((sum, v) => sum + v.total, 0))}
                     </div>
                     <div className="stat-label">Total Recaudado</div>
                   </div>
                 </div>
                 <IonList lines="inset">
                   {registroVentas.map((venta) => (
-                    <IonItem key={venta.idVenta} className={`venta-item ${venta.estado}`}>
+                    <IonItem key={venta.idVenta} className="venta-item">
                       <div className="venta-header">
                         <div className="venta-info">
                           <h4>Venta #{venta.idVenta}</h4>
@@ -718,11 +716,11 @@ const POS: React.FC = () => {
                         </div>
                         <div className="venta-total">
                           <div className="monto">{formatCLP(venta.total)}</div>
-                          <div className="medio">{venta.medioPago}</div>
+                          <div className="medio">{venta.medioPago.nombre}</div>
                         </div>
                       </div>
                       <div className="venta-detalle">
-                        <span className={`estado-badge estado-${venta.estado}`}>{venta.estado.toUpperCase()}</span>
+                        <span className="estado-badge estado-pagado">PAGADA</span>
                       </div>
                     </IonItem>
                   ))}

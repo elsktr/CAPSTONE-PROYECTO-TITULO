@@ -47,17 +47,24 @@ Ver `.env.example` (desarrollo) y `.env.production` (valores del contenedor).
 ## Cuentas y flujo de caja
 
 - **Vendedor** (`/login`): email `vendedor@rockstar.cl` + contraseña del backend.
-  Roles permitidos: `VENDEDOR`, `BODEGA`, `GERENTE`. Con "Recordarme" la sesión
-  dura 30 días (`refreshToken` en `localStorage`); sin marcarla, dura la jornada (8 h).
+  Solo `VENDEDOR` puede cobrar; `BODEGA` y `GERENTE` entran pero el backend rechaza la
+  venta. Con "Recordarme" la sesión dura 30 días (`refreshToken` en `localStorage`);
+  sin marcarla, dura la jornada (8 h).
 - **Cliente mostrador** (modal "Identificar cliente" al cobrar): cuenta rol `CLIENTE`,
-  p. ej. `cliente@rockstar.cl`. Sin sesión cliente no se puede cobrar.
-- **Despacho**: siempre `retiro` en tienda —
-  `Santiago, Av. Principal 123, Rockstar Store` ("Retiro en tienda").
-- **Medios de pago**: `contado` (aprobación inmediata) o `tarjeta` (Webpay simulado:
-  `aprobar:true/false` vía `POST /pagos/webpay/retorno`).
-- **Boleta**: modal con id, fecha, líneas, total, medio y giro; impresión con CSS
-  print-only (`window.print()`). Tras venta aprobada: stock se refresca, carrito se
-  vacía y el registro de jornada suma la venta.
+  p. ej. `cliente@rockstar.cl`. Sin sesión cliente no se puede cobrar. Queda anotado en
+  la venta y en el comprobante.
+- **Venta**: `POST /ventas/pos` con el token del vendedor. Registra la venta pagada,
+  descuenta el stock al momento y devuelve el comprobante. Sin flete ni pedido de
+  despacho: el comprador se lleva la prenda.
+- **Stock**: sale de la sala de ventas. Si la sala no alcanza, el backend responde
+  `409 EXISTENCIA_EN_BODEGA` y el POS ofrece "Retirar de bodega"; al aceptar reenvía
+  con `permitirBodega` y la misma clave de idempotencia.
+- **Medios de pago**: efectivo, débito o crédito. La tarjeta se pasa por el terminal
+  físico de la tienda: el POS solo registra el medio (Webpay es de la tienda web).
+- **Boleta**: comprobante interno sin validez tributaria, con id, fecha, vendedor,
+  cliente, líneas, total y medio; impresión con CSS print-only (`window.print()`). Tras
+  la venta: stock se refresca, carrito se vacía y el registro de jornada
+  (`GET /ventas/pos`, ventas del día del vendedor) suma la venta.
 
 ## Pruebas
 
