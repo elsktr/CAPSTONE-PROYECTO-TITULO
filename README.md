@@ -22,6 +22,8 @@ Las tres hablan con un mismo backend y una misma base de datos. Una prenda vendi
 ![Cypress](https://img.shields.io/badge/Cypress-69D3A7?logo=cypress&logoColor=black)
 ![Pruebas](https://img.shields.io/badge/pruebas-448%20pasando-brightgreen)
 
+> 📄 **[Informe de avance de la Fase 2](<Fase 2/Evidencias Proyecto/README.md>)**: resumen del avance, monitoreo del plan de trabajo, ajustes y capturas del sistema.
+
 ---
 
 ## Contenido
