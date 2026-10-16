@@ -10,6 +10,11 @@ import {
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
 import { sendOutline, callOutline, arrowForwardOutline, chatbubblesOutline, closeOutline } from 'ionicons/icons';
+import type { PedidoCliente } from '@rockstar/contracts';
+import { CONTEXTO_INICIAL, ContextoRoxy, responder } from '../../data/roxy';
+import { AuthService } from '../../services/auth.service';
+import { ProductsService } from '../../services/products.service';
+import { ShopApi } from '../../services/shop.api';
 
 interface ChatMessage {
   from: 'bot' | 'user';
@@ -104,23 +109,25 @@ interface ChatMessage {
 })
 export class SupportPage implements AfterViewChecked {
   router = inject(Router);
+  private readonly auth = inject(AuthService);
+  private readonly products = inject(ProductsService);
+  private readonly api = inject(ShopApi);
   @ViewChild('scrollContainer') scrollContainer?: ElementRef<HTMLDivElement>;
 
   whatsappUrl = `https://wa.me/56900000000?text=${encodeURIComponent('Hola Roxy, necesito ayuda con un pedido 🎸')}`;
 
-  quickReplies = ['Rastrear mi pedido', 'Quiero hacer una devolución', 'Hablar con un agente'];
+  quickReplies = ['Rastrear mi pedido', 'Quiero hacer una devolución', '¿Qué talla soy?', 'Costo de envío', 'Hablar con un agente'];
   inputText = '';
+
+  /** Lo que Roxy recuerda de la conversación: si ya saludó y qué respuesta espera. */
+  private contexto: ContextoRoxy = CONTEXTO_INICIAL;
+  /** Pedidos del cliente con sesión, para contestarle por ellos; `null` si no hay o no cargaron. */
+  private pedidos: PedidoCliente[] | null = null;
 
   messages = signal<ChatMessage[]>([
     { from: 'bot', text: '¡Hola! Soy *Roxy*, tu asistente de Rockstar 🚀 ¿En qué te puedo ayudar hoy?' },
     { from: 'bot', text: 'Puedo ayudarte con:\n1. 📦 Rastreo de pedidos\n2. 🔄 Cambios y devoluciones\n3. 💳 Métodos de pago\n4. 👕 Consultas de productos' },
   ]);
-
-  private botResponses: Record<string, string> = {
-    'rastrear mi pedido': 'Para rastrear tu pedido necesito tu *Número de Orden* y el *Correo* asociado. ¿Me los compartes? 📦',
-    'quiero hacer una devolución': 'Tienes hasta *30 días* después de tu compra para solicitar un cambio 🙌. Cuéntame el *motivo* y el *número de orden* para ayudarte.',
-    'hablar con un agente': 'Te derivo con un asesor del equipo Rockstar 🎸. Confírmame tu *nombre completo*, *número de orden* (si aplica) y el motivo de la consulta.',
-  };
 
   constructor() {
     addIcons({
@@ -130,6 +137,16 @@ export class SupportPage implements AfterViewChecked {
       'chatbubbles-outline': chatbubblesOutline,
       'close-outline': closeOutline,
     });
+    // Roxy contesta por precios y tallas con el catálogo, y a un cliente por sus pedidos.
+    if (!this.products.loaded() && !this.products.loading()) {
+      void this.products.load();
+    }
+    if (this.auth.isCustomer()) {
+      this.api.myOrders().then(
+        (pedidos) => (this.pedidos = pedidos),
+        () => (this.pedidos = null),
+      );
+    }
   }
 
   ngAfterViewChecked() {
@@ -144,16 +161,22 @@ export class SupportPage implements AfterViewChecked {
     if (!value) return;
     this.messages.update((m) => [...m, { from: 'user', text: value }]);
     this.inputText = '';
-    const lower = value.toLowerCase();
-    const response =
-      Object.entries(this.botResponses).find(([k]) => lower.includes(k))?.[1] ??
-      'Anotado ✅. Si me das más detalle (orden, email o producto) te ayudo al tiro.';
+    const esCliente = this.auth.isCustomer();
+    const respuesta = responder(value, this.contexto, {
+      nombre: esCliente ? (this.auth.user()?.name ?? null) : null,
+      esCliente,
+      productos: this.products.products(),
+      pedidos: this.pedidos,
+    });
+    this.contexto = respuesta.contexto;
     setTimeout(() => {
-      this.messages.update((m) => [...m, { from: 'bot', text: response }]);
+      this.messages.update((m) => [...m, { from: 'bot', text: respuesta.texto }]);
     }, 600);
   }
 
+  /** Lo escrito se muestra como texto: se escapa antes de dar formato a las *negritas* y los saltos de línea. */
   format(text: string): string {
-    return text.replace(/\*([^*]+)\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+    const escapado = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return escapado.replace(/\*([^*]+)\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
   }
 }
