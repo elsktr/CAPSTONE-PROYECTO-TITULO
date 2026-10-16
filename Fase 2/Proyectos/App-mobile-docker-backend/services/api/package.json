@@ -9,6 +9,8 @@
     "start": "node dist/services/api/src/main.js",
     "local": "npm run build && node test/entorno-local.mjs",
     "semilla:bandas": "node scripts/cargar-bandas.mjs",
+    "semilla:historial": "node scripts/sembrar-historial.mjs",
+    "semilla:historial:quitar": "node scripts/sembrar-historial.mjs --quitar",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --config vitest.config.mts",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts"

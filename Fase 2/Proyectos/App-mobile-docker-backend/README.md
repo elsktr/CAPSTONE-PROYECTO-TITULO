@@ -45,6 +45,23 @@ npm run semilla:bandas
 
 Las fotos de las bandas son reales, de Wikimedia Commons con licencia libre; sus autores y licencias están en `db/semillas/bandas/CREDITOS.md`. Los productos son de muestra y su imagen es una ilustración, no una foto de la prenda.
 
+**Recomendaciones de inversión.** En la tienda, el Gerente entra por "Acceso administrador" y, en Finanzas, abre "Recomendaciones de inversión". Es un modelo predictivo que usa las ventas del e-commerce y de la tienda física (`GET /api/v1/analitica/recomendaciones`, solo Gerente):
+
+- Pronostica la demanda semanal de cada prenda (talla y color). Para cada tipo de demanda, regular o intermitente según el criterio de Syntetos-Boylan, elige entre suavizado exponencial, Syntetos-Boylan, Holt amortiguado y media móvil: se queda con el que menos erró en semanas pasadas. El error que muestra se mide en las últimas 4 semanas, que no se usan para elegir, y se compara con repetir el promedio reciente.
+- Recomienda qué comprar y cuánto: la demanda del horizonte más un stock de seguridad al 95%, menos lo disponible, solo para lo que se agota antes de terminar el horizonte. También dice si va a la sala de ventas o a la bodega según dónde se vende más, y reparte un presupuesto opcional por prioridad y margen.
+- Marca el capital inmovilizado (stock que no se espera vender) y las bandas y categorías en alza o a la baja.
+- Los productos sin costo de compra usan un costo estimado con la proporción típica de su categoría, y la pantalla lo avisa.
+
+Con pocas ventas reales el modelo tiene poco con qué aprender. Para demostrarlo hay un historial simulado de 26 semanas en ambos canales, que se reconoce y se borra sin tocar las ventas reales:
+
+```
+cd services/api
+npm run semilla:historial            # crea el historial de demostración
+npm run semilla:historial:quitar     # lo borra
+```
+
+Escribe directo en PostgreSQL (`DATABASE_URL`, por defecto la base de `docker compose` en `localhost:5432`). No mueve el stock ni crea pedidos de despacho. Mientras exista, la pantalla avisa cuántas ventas de demostración incluye.
+
 Un producto creado desde la bodega no aparece en la tienda hasta que el Gerente le pone precio: en la tienda, "Acceso administrador", pestaña Bodega, botón Editar.
 
 Los pagos y los despachos son simulados: la tienda no cobra dinero y el código de seguimiento no existe en Starken. Ambos están detrás de adaptadores (`services/api/src/pagos/pasarela.ts` y `services/api/src/logistica/transportista.ts`) que se reemplazan al tener credenciales de Transbank y de Starken.
