@@ -177,3 +177,17 @@ body {
 .user-chip.is-admin .dot {
   background: var(--accent);
 }
+
+/* Probador 3D: se abre con ModalController, fuera de los estilos de la página. */
+ion-modal.modal-probador {
+  --width: min(980px, 100%);
+  --height: min(720px, 100%);
+  --border-radius: 18px;
+}
+
+@media (max-width: 767px) {
+  ion-modal.modal-probador {
+    --height: 100%;
+    --border-radius: 0;
+  }
+}
