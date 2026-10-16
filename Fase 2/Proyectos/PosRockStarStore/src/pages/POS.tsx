@@ -24,16 +24,26 @@ import {
   IonSegmentButton,
   IonRadio,
   IonRadioGroup,
+  IonToast,
 } from '@ionic/react';
 import { useAuth } from '../contexts/AuthContext';
-import { getCatalogo, ArticuloCatalogo, registrarVentaPos, getVentasPos, ComprobantePos, ErrorApi, LineaEnBodega, MedioPresencial, getImageUrl } from '../lib/api';
-import { useState, useEffect, useCallback } from 'react';
-import { cartOutline, logOutOutline, refreshOutline, receiptOutline, addOutline, removeOutline, warningOutline, checkmarkCircleOutline, closeCircleOutline, cashOutline, cardOutline, printOutline, timeOutline, listOutline, homeOutline } from 'ionicons/icons';
+import { getCatalogo, ArticuloCatalogo, registrarVentaPos, getVentasPos, ComprobantePos, ErrorApi, LineaEnBodega, MedioPresencial, getImageUrl, buscarPorCodigo } from '../lib/api';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { cartOutline, logOutOutline, refreshOutline, receiptOutline, addOutline, removeOutline, warningOutline, checkmarkCircleOutline, closeCircleOutline, cashOutline, cardOutline, printOutline, timeOutline, listOutline, homeOutline, personCircleOutline } from 'ionicons/icons';
 import { formatCLP } from '../utils/format';
 import { ProductImage } from '../components/ProductImage';
 import { EmptyState, ErrorAlert, SkeletonGrid } from '../components/FeedbackStates';
+import { EscanerCamara, ResultadoLectura } from '../components/EscanerCamara';
+import { BarraEscaneo } from '../components/BarraEscaneo';
+import { porSku } from '../utils/busqueda';
+import { CobroEnMaquina } from '../components/CobroEnMaquina';
+import { AjustesMaquina } from '../components/AjustesMaquina';
+import { CobroMaquina, ConfigMaquina, guardarConfigMaquina, leerConfigMaquina, maquinaHttp, pagoParaVenta, tipoTarjeta } from '../lib/terminal';
 
-/** La tarjeta se pasa por el terminal de la tienda; el POS solo registra con que se pago. */
+/**
+ * Con la maquina de cobro activa, la tarjeta se cobra enviandole el monto. Sin ella, se
+ * pasa por un terminal aparte y el POS solo registra con que se pago.
+ */
 const MEDIOS_PAGO: { codigo: MedioPresencial; nombre: string; descripcion: string; icono: string }[] = [
   { codigo: 'EFECTIVO', nombre: 'Efectivo', descripcion: 'Pago en caja', icono: cashOutline },
   { codigo: 'DEBITO_PRESENCIAL', nombre: 'Tarjeta de débito', descripcion: 'Cobrar en el terminal de la tienda', icono: cardOutline },
@@ -49,7 +59,7 @@ const POS: React.FC = () => {
   const [carrito, setCarrito] = useState<Map<number, number>>(new Map());
   const [showBoleta, setShowBoleta] = useState(false);
   const [boletaData, setBoletaData] = useState<any>(null);
-  const [showClienteModal, setShowClienteModal] = useState(false);
+  const [identificandoCliente, setIdentificandoCliente] = useState(false);
   const [clienteEmail, setClienteEmail] = useState('');
   const [clientePassword, setClientePassword] = useState('');
   const [clienteLoading, setClienteLoading] = useState(false);
@@ -61,7 +71,9 @@ const POS: React.FC = () => {
   const [showCheckoutError, setShowCheckoutError] = useState(false);
   const [medioPago, setMedioPago] = useState<MedioPresencial>('EFECTIVO');
   const [showMedioPagoModal, setShowMedioPagoModal] = useState(false);
-  const [idempotencyKey, setIdempotencyKey] = useState<string>('');
+  // Clave de la venta en curso. En un ref y no en estado: al anular un cobro y seguir en
+  // el mismo clic, la venta debe salir con la clave nueva, no con la del render anterior.
+  const claveVenta = useRef('');
   // Lineas que la sala de ventas no alcanza: se pide confirmar el retiro desde bodega.
   const [lineasEnBodega, setLineasEnBodega] = useState<LineaEnBodega[] | null>(null);
 
@@ -70,9 +82,25 @@ const POS: React.FC = () => {
   const [registroVentas, setRegistroVentas] = useState<ComprobantePos[]>([]);
   const [registroLoading, setRegistroLoading] = useState(false);
 
-  const generateIdempotencyKey = useCallback(() => {
-    return crypto.randomUUID();
-  }, []);
+  // Escaneo: camara, pistola USB (escribe el codigo y Enter) o busqueda en la barra.
+  const [showEscaner, setShowEscaner] = useState(false);
+  const [aviso, setAviso] = useState<ResultadoLectura | null>(null);
+  // La ultima prenda sumada se destaca en la grilla de la venta.
+  const [ultimoAgregado, setUltimoAgregado] = useState<number | null>(null);
+  // Lecturas seguidas llegan antes de que React vuelva a renderizar: se leen de aqui.
+  const catalogoRef = useRef(catalogo);
+  catalogoRef.current = catalogo;
+  const carritoRef = useRef(carrito);
+  carritoRef.current = carrito;
+
+  // Maquina de cobro de esta caja.
+  const [configMaquina, setConfigMaquina] = useState<ConfigMaquina>(leerConfigMaquina);
+  const maquina = useMemo(() => maquinaHttp(configMaquina.direccion), [configMaquina.direccion]);
+  const [showAjustesMaquina, setShowAjustesMaquina] = useState(false);
+  const [showCobroMaquina, setShowCobroMaquina] = useState(false);
+  // Cobro aprobado en la maquina cuya venta aun no queda registrada. Si la venta no se
+  // registra, se anula: el cliente no puede quedar cobrado sin venta.
+  const [cobroAprobado, setCobroAprobado] = useState<CobroMaquina | null>(null);
 
   useEffect(() => {
     cargarCatalogo();
@@ -118,6 +146,54 @@ const POS: React.FC = () => {
     }
   };
 
+  /** Suma una unidad de la prenda a la venta, sin pasar del stock disponible. */
+  const agregarItem = (item: ArticuloCatalogo): ResultadoLectura => {
+    const nombre = `${item.producto} (${item.talla}/${item.color})`;
+    const enCarrito = carritoRef.current.get(item.idVariante) ?? 0;
+    if (item.disponible === 0) return { ok: false, mensaje: `${nombre} no tiene stock.` };
+    if (enCarrito >= item.disponible) {
+      return { ok: false, mensaje: `Ya están en el carrito las ${item.disponible} unidades disponibles de ${nombre}.` };
+    }
+    const nuevoCarrito = new Map(carritoRef.current);
+    nuevoCarrito.set(item.idVariante, enCarrito + 1);
+    carritoRef.current = nuevoCarrito;
+    setCarrito(nuevoCarrito);
+    setUltimoAgregado(item.idVariante);
+    return { ok: true, mensaje: `Agregado: ${nombre} · ${enCarrito + 1} en el carrito` };
+  };
+
+  /**
+   * Agrega la prenda de una etiqueta. El QR lleva el SKU, que se busca en el catalogo
+   * cargado; el codigo de barras se resuelve en el backend.
+   */
+  const agregarPorCodigo = async (codigoLeido: string): Promise<ResultadoLectura> => {
+    const codigo = codigoLeido.trim();
+    if (!codigo) return { ok: false, mensaje: 'Escanea o escribe un código.' };
+
+    const item = porSku(catalogoRef.current, codigo);
+    if (item) return agregarItem(item);
+    if (!vendedor) return { ok: false, mensaje: 'Inicia sesión para escanear.' };
+    try {
+      const variante = await buscarPorCodigo(vendedor.accessToken, codigo);
+      const aLaVenta = catalogoRef.current.find(p => p.idVariante === variante.idVariante);
+      if (!aLaVenta) {
+        return { ok: false, mensaje: `${variante.producto} (${variante.talla}/${variante.color}) no está a la venta: aún no tiene precio.` };
+      }
+      return agregarItem(aLaVenta);
+    } catch (err) {
+      if (err instanceof ErrorApi && err.status === 404) {
+        return { ok: false, mensaje: `El código ${codigo} no está registrado.` };
+      }
+      return { ok: false, mensaje: err instanceof Error ? err.message : 'No se pudo buscar el código.' };
+    }
+  };
+
+  /** Lo que se esta vendiendo, lo ultimo agregado primero. */
+  const productosVenta = Array.from(carrito.keys())
+    .reverse()
+    .map(id => catalogo.find(p => p.idVariante === id))
+    .filter((p): p is ArticuloCatalogo => p !== undefined);
+
   const getCantidad = (idVariante: number) => carrito.get(idVariante) || 0;
   const getDisponible = (idVariante: number) => {
     const item = catalogo.find(p => p.idVariante === idVariante);
@@ -146,21 +222,19 @@ const POS: React.FC = () => {
     return true;
   };
 
+  /** El cliente es opcional: se identifica, si quiere, dentro del cobro. */
   const handleCobrar = () => {
-    if (!cliente) {
-      setShowClienteModal(true);
-      return;
-    }
-    setIdempotencyKey(generateIdempotencyKey());
+    // Con un cobro ya aprobado se conserva la clave: reintentar no duplica la venta.
+    if (!cobroAprobado) claveVenta.current = crypto.randomUUID();
     setShowMedioPagoModal(true);
   };
 
   /**
-   * Registra la venta en el backend: descuenta el stock y devuelve el comprobante. La
-   * tarjeta se cobra en el terminal de la tienda, asi que no hay pasarela que resolver.
-   * `desdeBodega` son las variantes que el vendedor acepto retirar de bodega.
+   * Registra la venta en el backend: descuenta el stock y devuelve el comprobante.
+   * `desdeBodega` son las variantes que el vendedor acepto retirar de bodega; `cobro` es
+   * el pago aprobado en la maquina, si la venta se cobro en ella.
    */
-  const procesarVenta = async (desdeBodega: number[] = []) => {
+  const procesarVenta = async (desdeBodega: number[] = [], cobro: CobroMaquina | null = cobroAprobado) => {
     if (!vendedor) return;
 
     setCheckoutLoading(true);
@@ -168,7 +242,7 @@ const POS: React.FC = () => {
 
     try {
       const comprobante = await registrarVentaPos(vendedor.accessToken, {
-        claveIdempotencia: idempotencyKey,
+        claveIdempotencia: claveVenta.current,
         lineas: lineasCarrito.map(l => ({
           idVariante: l.idVariante,
           cantidad: l.cantidad,
@@ -176,8 +250,13 @@ const POS: React.FC = () => {
         })),
         medioPago,
         idCliente: cliente?.usuario.id,
+        // La autorizacion queda guardada con la venta en el backend.
+        pagoMaquina: cobro ? pagoParaVenta(cobro) : undefined,
       });
       mostrarBoleta(comprobante);
+      setCobroAprobado(null);
+      // El proximo comprador parte sin cliente identificado.
+      setCliente(null);
       setCarrito(new Map());
       await cargarCatalogo();
       await cargarRegistro();
@@ -188,7 +267,11 @@ const POS: React.FC = () => {
         return;
       }
       const mensaje = err instanceof Error ? err.message : 'Error al registrar la venta';
-      if (err instanceof ErrorApi && err.codigo === 'STOCK_INSUFICIENTE') {
+      if (err instanceof ErrorApi && err.codigo === 'COBRO_YA_USADO') {
+        // Ese cobro ya pago otra venta: no se ofrece anularlo ni reintentar con el.
+        setCobroAprobado(null);
+        setCheckoutError(mensaje + ' Revisa el registro de jornada antes de cobrar de nuevo.');
+      } else if (err instanceof ErrorApi && err.codigo === 'STOCK_INSUFICIENTE') {
         setCheckoutError('Sin stock: ' + mensaje);
         await cargarCatalogo();
       } else {
@@ -212,7 +295,33 @@ const POS: React.FC = () => {
     await procesarVenta();
   };
 
+  /** Reversa en la maquina un cobro cuya venta no se va a registrar. Devuelve si se pudo. */
+  const anularCobro = async (): Promise<boolean> => {
+    const cobro = cobroAprobado;
+    if (!cobro) return true;
+    try {
+      await maquina.anular(cobro.id);
+      setCobroAprobado(null);
+      setAviso({ ok: true, mensaje: `Cobro de ${formatCLP(cobro.monto)} anulado en la máquina.` });
+      return true;
+    } catch (err) {
+      setCheckoutError(
+        `No se pudo anular en la máquina el cobro de ${formatCLP(cobro.monto)} (autorización ${cobro.codigoAutorizacion}). ` +
+          (err instanceof Error ? err.message : ''),
+      );
+      setShowCheckoutError(true);
+      return false;
+    }
+  };
+
+  const alAprobarCobro = (cobro: CobroMaquina) => {
+    setShowCobroMaquina(false);
+    setCobroAprobado(cobro);
+    procesarVenta([], cobro);
+  };
+
   const mostrarBoleta = (comprobante: ComprobantePos) => {
+    const pago = comprobante.pagoMaquina;
     const boleta = {
       idVenta: comprobante.idVenta,
       fecha: new Date(comprobante.fecha).toLocaleString('es-CL'),
@@ -229,6 +338,8 @@ const POS: React.FC = () => {
       })),
       total: comprobante.total,
       medioPago: comprobante.medioPago.nombre,
+      // Lo que guardo el backend, no lo que dijo la maquina: la boleta refleja el registro.
+      pagoMaquina: pago ? { autorizacion: pago.codigoAutorizacion, tarjeta: pago.ultimosDigitos ? `•••• ${pago.ultimosDigitos}` : 'tarjeta' } : null,
       giro: 'Rockstar Store SpA - Gira Musical y Merchandising',
       direccion: 'Av. Principal 123, Santiago, Chile',
       rut: '76.123.456-7',
@@ -282,6 +393,7 @@ const POS: React.FC = () => {
         <div class="totales">
           <div class="linea total"><span>TOTAL</span><span>${formatCLP(boletaData.total)}</span></div>
           <div class="linea"><span>Medio de pago</span><span>${boletaData.medioPago}</span></div>
+          ${boletaData.pagoMaquina ? `<div class="linea"><span>Autorización</span><span>${boletaData.pagoMaquina.autorizacion} · ${boletaData.pagoMaquina.tarjeta}</span></div>` : ''}
         </div>
         <div class="giro">
           <p>${boletaData.giro}</p>
@@ -309,10 +421,9 @@ const POS: React.FC = () => {
         throw new Error('La cuenta debe ser de rol CLIENTE');
       }
       setCliente(sesion);
-      setShowClienteModal(false);
-      // Cada cobro lleva su propia clave, también cuando empieza identificando al cliente.
-      setIdempotencyKey(generateIdempotencyKey());
-      setShowMedioPagoModal(true);
+      setIdentificandoCliente(false);
+      setClienteEmail('');
+      setClientePassword('');
     } catch (err) {
       setClienteError(err instanceof Error ? err.message : 'Error al iniciar sesión');
     } finally {
@@ -336,9 +447,30 @@ const POS: React.FC = () => {
     }
   };
 
-  const handleMedioPagoConfirmar = () => {
+  /** Tarjeta que se cobra en la maquina, si esta activa y el medio es debito o credito. */
+  const tarjetaEnMaquina = configMaquina.activa ? tipoTarjeta(medioPago) : null;
+
+  const handleMedioPagoConfirmar = async () => {
+    let cobro = cobroAprobado;
+    // Un cobro aprobado que ya no calza con esta venta (otro monto o medio) se anula antes.
+    if (cobro && (cobro.monto !== total || cobro.tipo !== tarjetaEnMaquina)) {
+      if (!(await anularCobro())) return;
+      cobro = null;
+      claveVenta.current = crypto.randomUUID();
+    }
     setShowMedioPagoModal(false);
-    procesarVenta();
+    if (tarjetaEnMaquina && !cobro) {
+      setShowCobroMaquina(true);
+      return;
+    }
+    procesarVenta([], cobro);
+  };
+
+  const guardarAjustesMaquina = (config: ConfigMaquina) => {
+    guardarConfigMaquina(config);
+    setConfigMaquina(config);
+    setShowAjustesMaquina(false);
+    setAviso({ ok: true, mensaje: config.activa ? 'Máquina de cobro activada.' : 'Máquina de cobro desactivada.' });
   };
 
   if (loading) {
@@ -351,9 +483,9 @@ const POS: React.FC = () => {
         </IonHeader>
         <IonContent className="ion-padding pos-page">
           <div className="pos-header">
-            <h2>Catálogo</h2>
+            <h2>Productos de la venta</h2>
           </div>
-          <SkeletonGrid count={8} />
+          <SkeletonGrid count={4} />
         </IonContent>
       </>
     );
@@ -373,6 +505,14 @@ const POS: React.FC = () => {
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
+            <IonButton
+              onClick={() => setShowAjustesMaquina(true)}
+              fill="clear"
+              aria-label={configMaquina.activa ? 'Máquina de cobro (activa)' : 'Máquina de cobro (desactivada)'}
+              className={`maquina-btn${configMaquina.activa ? ' activa' : ''}`}
+            >
+              <IonIcon icon={cardOutline} />
+            </IonButton>
             <IonButton onClick={handleCerrarSesion} fill="clear" aria-label="Cerrar sesión">
               <IonIcon icon={logOutOutline} />
             </IonButton>
@@ -381,9 +521,39 @@ const POS: React.FC = () => {
       </IonHeader>
       <IonContent className="ion-padding pos-page">
         <div className="pos-header">
-          <h2>Catálogo</h2>
-          <span className="vendedor-nombre">Vendedor: {vendedor?.usuario.nombre}</span>
+          <h2>Productos de la venta</h2>
+          <div className="pos-header-datos">
+            <button
+              type="button"
+              className={`maquina-chip${configMaquina.activa ? ' activa' : ''}`}
+              onClick={() => setShowAjustesMaquina(true)}
+            >
+              <IonIcon icon={cardOutline} aria-hidden="true" />
+              {configMaquina.activa ? 'Máquina de cobro activa' : 'Activar máquina de cobro'}
+            </button>
+            <span className="vendedor-nombre">Vendedor: {vendedor?.usuario.nombre}</span>
+          </div>
         </div>
+
+        <BarraEscaneo
+          catalogo={catalogo}
+          cantidadEnVenta={getCantidad}
+          onCodigo={agregarPorCodigo}
+          onElegir={agregarItem}
+          onResultado={setAviso}
+          onAbrirCamara={() => setShowEscaner(true)}
+        />
+
+        <EscanerCamara isOpen={showEscaner} onClose={() => setShowEscaner(false)} onCodigo={agregarPorCodigo} />
+
+        <IonToast
+          isOpen={aviso !== null}
+          message={aviso?.mensaje}
+          color={aviso?.ok ? 'success' : 'danger'}
+          duration={2500}
+          position="top"
+          onDidDismiss={() => setAviso(null)}
+        />
 
         {error && (
           <ErrorAlert message={error} onRetry={cargarCatalogo} />
@@ -401,9 +571,15 @@ const POS: React.FC = () => {
           isOpen={showCheckoutError}
           onDidDismiss={() => setShowCheckoutError(false)}
           header="Error en la venta"
-          message={checkoutError || 'Error al procesar la venta'}
+          message={
+            (checkoutError || 'Error al procesar la venta') +
+            (cobroAprobado
+              ? ` El cobro de ${formatCLP(cobroAprobado.monto)} ya está aprobado en la máquina: reintenta para registrar la venta, o anúlalo.`
+              : '')
+          }
           buttons={[
             { text: 'Reintentar', handler: () => reintentarCheckout() },
+            ...(cobroAprobado ? [{ text: 'Anular cobro', role: 'destructive', handler: () => { void anularCobro(); } }] : []),
             'OK'
           ]}
         />
@@ -417,22 +593,25 @@ const POS: React.FC = () => {
             (lineasEnBodega ?? [])
               .map(l => `${l.producto} talla ${l.talla} (sala ${l.enSala}, bodega ${l.enBodega})`)
               .join('; ') +
-            '. ¿Retirar lo que falta desde bodega?'
+            '. ¿Retirar lo que falta desde bodega?' +
+            (cobroAprobado ? ' Si cancelas, se anula el cobro en la máquina.' : '')
           }
           buttons={[
-            { text: 'Cancelar', role: 'cancel' },
+            // Sin venta no puede quedar el cobro: cancelar lo anula en la maquina.
+            { text: 'Cancelar', role: 'cancel', handler: () => { if (cobroAprobado) void anularCobro(); } },
             { text: 'Retirar de bodega', handler: () => confirmarRetiroBodega() },
           ]}
         />
 
         <IonGrid>
           <IonRow>
-            {catalogo.map((producto) => (
+            {productosVenta.map((producto) => (
               <IonCol key={producto.idVariante} size="12" sizeSm="6" sizeMd="4" sizeLg="3" sizeXl="3">
                 <ProductCard
                   producto={producto}
                   cantidad={getCantidad(producto.idVariante)}
                   disponible={producto.disponible}
+                  destacado={producto.idVariante === ultimoAgregado}
                   onAgregar={() => agregarAlCarrito(producto.idVariante, producto.disponible)}
                   onQuitar={() => quitarDelCarrito(producto.idVariante)}
                 />
@@ -440,6 +619,16 @@ const POS: React.FC = () => {
             ))}
           </IonRow>
         </IonGrid>
+
+        {!error && catalogo.length > 0 && productosVenta.length === 0 && (
+          <EmptyState
+            title="Escanea un producto"
+            copy="Pasa la etiqueta por la cámara o la pistola, o búscalo por nombre en la barra de arriba."
+            ctaLabel="Escanear con cámara"
+            onCta={() => setShowEscaner(true)}
+            className="venta-vacia"
+          />
+        )}
 
         {!error && catalogo.length === 0 && (
           <EmptyState
@@ -507,77 +696,92 @@ const POS: React.FC = () => {
           )}
         </div>
 
-        {/* Modal identificar cliente */}
-        <IonModal
-          isOpen={showClienteModal}
-          onDidDismiss={() => setShowClienteModal(false)}
-          className="pos-modal-centered"
-          backdropDismiss={true}
-          showBackdrop={true}
-          aria-label="Identificar cliente"
-        >
-          <IonHeader>
-            <IonToolbar color="dark">
-              <IonTitle>Identificar cliente</IonTitle>
-              <IonButtons slot="end">
-                <IonButton onClick={() => setShowClienteModal(false)} fill="clear">
-                  <IonIcon icon={closeCircleOutline} />
-                </IonButton>
-              </IonButtons>
-            </IonToolbar>
-          </IonHeader>
-          <IonContent className="ion-padding">
-            <form onSubmit={handleLoginCliente}>
-              <IonItem>
-                <IonLabel position="floating">Correo cliente</IonLabel>
-                <IonInput
-                  id="cliente-email"
-                  aria-label="Correo cliente"
-                  type="email"
-                  value={clienteEmail}
-                  onIonChange={(e: any) => setClienteEmail(e.detail.value || '')}
-                  disabled={clienteLoading}
-                />
-              </IonItem>
-              <IonItem>
-                <IonLabel position="floating">Contraseña</IonLabel>
-                <IonInput
-                  id="cliente-password"
-                  aria-label="Contraseña cliente"
-                  type="password"
-                  value={clientePassword}
-                  onIonChange={(e: any) => setClientePassword(e.detail.value || '')}
-                  disabled={clienteLoading}
-                />
-              </IonItem>
-              {clienteError && <IonText color="danger"><p>{clienteError}</p></IonText>}
-              <IonButton expand="block" type="submit" disabled={clienteLoading}>
-                {clienteLoading ? <IonSpinner name="crescent" /> : 'Continuar'}
-              </IonButton>
-            </form>
-          </IonContent>
-        </IonModal>
-
         {/* Modal medio de pago */}
         <IonModal
           isOpen={showMedioPagoModal}
-          onDidDismiss={() => setShowMedioPagoModal(false)}
-          className="pos-modal-centered"
+          onDidDismiss={() => {
+            setShowMedioPagoModal(false);
+            setIdentificandoCliente(false);
+          }}
+          className="pos-modal-centered cobro-modal"
           backdropDismiss={true}
           showBackdrop={true}
-          aria-label="Medio de pago"
+          aria-label="Cobrar venta"
         >
           <IonHeader>
             <IonToolbar color="dark">
-              <IonTitle>Medio de pago</IonTitle>
+              <IonTitle>Cobrar venta</IonTitle>
               <IonButtons slot="end">
-                <IonButton onClick={() => setShowMedioPagoModal(false)} fill="clear">
+                <IonButton onClick={() => setShowMedioPagoModal(false)} fill="clear" aria-label="Cerrar cobro">
                   <IonIcon icon={closeCircleOutline} />
                 </IonButton>
               </IonButtons>
             </IonToolbar>
           </IonHeader>
           <IonContent className="ion-padding">
+            <div className="cobro-total">
+              <span>Total</span>
+              <strong>{formatCLP(total)}</strong>
+            </div>
+
+            <div className="cobro-cliente">
+              <IonIcon icon={personCircleOutline} aria-hidden="true" />
+              {cliente ? (
+                <>
+                  <span>Cliente: <strong>{cliente.usuario.nombre}</strong></span>
+                  <IonButton fill="clear" size="small" onClick={() => setCliente(null)}>Quitar</IonButton>
+                </>
+              ) : (
+                <>
+                  <span>Venta sin cliente <small>(opcional)</small></span>
+                  {!identificandoCliente && (
+                    <IonButton fill="clear" size="small" onClick={() => { setClienteError(null); setIdentificandoCliente(true); }}>
+                      Identificar cliente
+                    </IonButton>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Dentro del cobro y no en otro modal: dos modales apilados se disputan el foco. */}
+            {!cliente && identificandoCliente && (
+              <form className="cliente-form" onSubmit={handleLoginCliente} aria-label="Identificar cliente">
+                <IonItem>
+                  <IonInput
+                    id="cliente-email"
+                    label="Correo cliente"
+                    labelPlacement="stacked"
+                    type="email"
+                    autocomplete="off"
+                    value={clienteEmail}
+                    onIonChange={(e: any) => setClienteEmail(e.detail.value || '')}
+                    disabled={clienteLoading}
+                  />
+                </IonItem>
+                <IonItem>
+                  <IonInput
+                    id="cliente-password"
+                    label="Contraseña"
+                    labelPlacement="stacked"
+                    type="password"
+                    value={clientePassword}
+                    onIonChange={(e: any) => setClientePassword(e.detail.value || '')}
+                    disabled={clienteLoading}
+                  />
+                </IonItem>
+                {clienteError && <IonText color="danger"><p>{clienteError}</p></IonText>}
+                <div className="cliente-form-acciones">
+                  <IonButton fill="clear" color="medium" onClick={() => setIdentificandoCliente(false)} disabled={clienteLoading}>
+                    Cancelar
+                  </IonButton>
+                  <IonButton type="submit" disabled={clienteLoading}>
+                    {clienteLoading ? <IonSpinner name="crescent" /> : 'Continuar'}
+                  </IonButton>
+                </div>
+              </form>
+            )}
+
+            <h3 className="cobro-subtitulo">Medio de pago</h3>
             <IonRadioGroup value={medioPago} onIonChange={(e: any) => setMedioPago(e.detail.value)}>
               <IonList>
                 {MEDIOS_PAGO.map((medio) => (
@@ -588,7 +792,9 @@ const POS: React.FC = () => {
                         <IonIcon icon={medio.icono} slot="start" color={medio.codigo === 'EFECTIVO' ? 'primary' : 'tertiary'} />
                         <div>
                           <strong>{medio.nombre}</strong>
-                          <p className="medio-pago-desc">{medio.descripcion}</p>
+                          <p className="medio-pago-desc">
+                            {configMaquina.activa && medio.codigo !== 'EFECTIVO' ? 'Se cobra en la máquina de cobro' : medio.descripcion}
+                          </p>
                         </div>
                       </div>
                     </IonLabel>
@@ -596,11 +802,44 @@ const POS: React.FC = () => {
                 ))}
               </IonList>
             </IonRadioGroup>
-            <IonButton expand="block" color="primary" onClick={handleMedioPagoConfirmar} disabled={checkoutLoading} className="mt-16">
-              {checkoutLoading ? <IonSpinner name="crescent" /> : 'Confirmar y pagar'}
+            <IonButton expand="block" color="primary" onClick={() => void handleMedioPagoConfirmar()} disabled={checkoutLoading} className="mt-16 confirmar-cobro">
+              {checkoutLoading ? (
+                <IonSpinner name="crescent" />
+              ) : tarjetaEnMaquina && !cobroAprobado ? (
+                <>
+                  <IonIcon icon={cardOutline} slot="start" />
+                  Cobrar {formatCLP(total)} en la máquina
+                </>
+              ) : (
+                'Confirmar y pagar'
+              )}
             </IonButton>
           </IonContent>
         </IonModal>
+
+        <CobroEnMaquina
+          isOpen={showCobroMaquina}
+          maquina={maquina}
+          monto={total}
+          tarjeta={tipoTarjeta(medioPago) ?? 'DEBITO'}
+          referencia={claveVenta.current}
+          onAprobado={alAprobarCobro}
+          onCerrar={() => {
+            setShowCobroMaquina(false);
+            setShowMedioPagoModal(true);
+          }}
+          onSinMaquina={() => {
+            setShowCobroMaquina(false);
+            procesarVenta([], null);
+          }}
+        />
+
+        <AjustesMaquina
+          isOpen={showAjustesMaquina}
+          config={configMaquina}
+          onGuardar={guardarAjustesMaquina}
+          onClose={() => setShowAjustesMaquina(false)}
+        />
 
         {/* Modal Boleta */}
         <IonModal
@@ -637,6 +876,9 @@ const POS: React.FC = () => {
                   <div><strong>Vendedor</strong><span>{boletaData.vendedor}</span></div>
                   {boletaData.cliente && <div><strong>Cliente</strong><span>{boletaData.cliente}</span></div>}
                   <div><strong>Medio de pago</strong><span>{boletaData.medioPago}</span></div>
+                  {boletaData.pagoMaquina && (
+                    <div><strong>Autorización</strong><span>{boletaData.pagoMaquina.autorizacion} · {boletaData.pagoMaquina.tarjeta}</span></div>
+                  )}
                 </div>
                 <div className="boleta-lineas">
                   <div className="boleta-linea">
@@ -721,6 +963,12 @@ const POS: React.FC = () => {
                       </div>
                       <div className="venta-detalle">
                         <span className="estado-badge estado-pagado">PAGADA</span>
+                        {venta.pagoMaquina && (
+                          <span className="venta-autorizacion">
+                            Autorización {venta.pagoMaquina.codigoAutorizacion}
+                            {venta.pagoMaquina.ultimosDigitos && ` · •••• ${venta.pagoMaquina.ultimosDigitos}`}
+                          </span>
+                        )}
                       </div>
                     </IonItem>
                   ))}
@@ -743,16 +991,18 @@ interface ProductCardProps {
   producto: ArticuloCatalogo;
   cantidad: number;
   disponible: number;
+  /** La ultima prenda escaneada o agregada. */
+  destacado?: boolean;
   onAgregar: () => void;
   onQuitar: () => void;
 }
 
-const ProductCard: React.FC<ProductCardProps> = ({ producto, cantidad, disponible, onAgregar, onQuitar }) => {
+const ProductCard: React.FC<ProductCardProps> = ({ producto, cantidad, disponible, destacado = false, onAgregar, onQuitar }) => {
   const sinStock = disponible === 0;
   const enTope = cantidad >= disponible;
 
   return (
-    <IonCard className={`product-card interactive-hover tap-feedback anim-fade-in ${sinStock ? 'sin-stock' : ''} ${enTope && cantidad > 0 ? 'en-tope' : ''}`}>
+    <IonCard className={`product-card interactive-hover tap-feedback anim-fade-in ${sinStock ? 'sin-stock' : ''} ${enTope && cantidad > 0 ? 'en-tope' : ''} ${destacado ? 'recien-agregado' : ''}`}>
       <IonCardContent>
         <div className="product-image">
           <ProductImage src={getImageUrl(producto)} alt={producto.producto} />

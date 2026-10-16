@@ -47,12 +47,11 @@ describe('POS - Cobro en efectivo', () => {
     cy.wait('@login');
     cy.wait('@catalogo');
     
-    cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click();
-    });
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
     
     cy.get('ion-button.cobrar-button').click();
-    cy.get('ion-modal[is-open]').within(() => {
+    cy.contains('ion-button', 'Identificar cliente').click();
+    cy.get('.cliente-form').within(() => {
       cy.get('#cliente-email input').clear().type('cliente@rockstar.cl');
       cy.get('#cliente-password input').clear().type('password123');
       cy.get('ion-button[type="submit"]').click();
@@ -73,9 +72,36 @@ describe('POS - Cobro en efectivo', () => {
     cy.contains('Boleta de Venta').should('be.visible');
     cy.get('.boleta-info').should('contain', 'Boleta N°').and('contain', '100');
     cy.get('.boleta-totales').should('contain', '$15.000');
-    cy.contains('Efectivo').should('be.visible');
+    cy.get('.boleta-info').should('contain', 'Efectivo');
 
     cy.get('ion-button.boleta-cerrar-btn').click();
     cy.get('.carrito-vacio').should('be.visible');
+
+    // El cliente era de esa venta: el proximo comprador parte sin cliente.
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
+    cy.get('ion-button.cobrar-button').click();
+    cy.get('.cobro-cliente').should('contain', 'Venta sin cliente');
+  });
+
+  it('debe registrar la venta sin cliente identificado', () => {
+    cy.visit('/login');
+    cy.wait('@salud');
+    cy.get('#login-email input').clear().type('vendedor@rockstar.cl');
+    cy.get('#login-password input').clear().type('password123');
+    cy.get('ion-button[type="submit"]').click();
+    cy.wait('@login');
+    cy.wait('@catalogo');
+
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
+    cy.get('ion-button.cobrar-button').click();
+    cy.get('.cobro-cliente').should('contain', 'Venta sin cliente');
+    cy.get('ion-radio[value="EFECTIVO"]').click();
+    cy.contains('Confirmar y pagar').click();
+
+    cy.wait('@venta').then(({ request }) => {
+      expect(request.body).to.include({ medioPago: 'EFECTIVO' });
+      expect(request.body).not.to.have.property('idCliente');
+    });
+    cy.contains('Boleta de Venta').should('be.visible');
   });
 });

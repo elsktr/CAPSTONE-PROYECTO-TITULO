@@ -22,9 +22,7 @@ describe('POS Carrito - Stock y Totales Reactivos', () => {
         });
       }
     }).as('login');
-  });
 
-  it('debe cargar el catálogo y mostrar productos en tarjetas', () => {
     cy.visit('/login');
     cy.wait('@salud');
     cy.get('#login-email input').clear().type('vendedor@rockstar.cl');
@@ -33,20 +31,21 @@ describe('POS Carrito - Stock y Totales Reactivos', () => {
     cy.wait('@login');
     cy.url().should('include', '/pos');
     cy.wait('@catalogo');
-    cy.get('ion-card.product-card').should('have.length.at.least', 1);
+  });
+
+  it('debe mostrar en tarjetas solo los productos escaneados', () => {
+    cy.get('ion-card.product-card').should('not.exist');
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
+    cy.get('.scan-input').type('GOR-NEG-U{enter}');
+    cy.get('ion-card.product-card').should('have.length', 2);
+    // Lo ultimo escaneado va primero y queda destacado.
+    cy.get('ion-card.product-card').first().should('contain', 'Gorro Rockstar').and('have.class', 'recien-agregado');
   });
 
   it('debe permitir agregar y quitar cantidad con stepper y actualizar total reactivo', () => {
-    cy.visit('/login');
-    cy.wait('@salud');
-    cy.get('#login-email input').clear().type('vendedor@rockstar.cl');
-    cy.get('#login-password input').clear().type('password123');
-    cy.get('ion-button[type="submit"]').click();
-    cy.wait('@login');
-    cy.wait('@catalogo');
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
 
     cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click();
       cy.get('.cantidad').should('contain', '1');
       cy.get('.product-stepper ion-button').last().click();
       cy.get('.cantidad').should('contain', '2');
@@ -57,18 +56,19 @@ describe('POS Carrito - Stock y Totales Reactivos', () => {
     cy.get('.carrito-total strong').should('be.visible');
   });
 
+  it('debe quitar la tarjeta al bajar la cantidad a 0', () => {
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
+    cy.get('ion-card.product-card').first().find('.product-stepper ion-button').first().click();
+    cy.get('ion-card.product-card').should('not.exist');
+    cy.get('.carrito-vacio').should('be.visible');
+  });
+
   it('debe inhabilitar + al llegar al tope de stock', () => {
-    cy.visit('/login');
-    cy.wait('@salud');
-    cy.get('#login-email input').clear().type('vendedor@rockstar.cl');
-    cy.get('#login-password input').clear().type('password123');
-    cy.get('ion-button[type="submit"]').click();
-    cy.wait('@login');
-    cy.wait('@catalogo');
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
 
     cy.get('ion-card.product-card').first().within(() => {
       const maxStock = 7;
-      for (let i = 0; i < maxStock; i++) {
+      for (let i = 1; i < maxStock; i++) {
         cy.get('.product-stepper ion-button').last().click();
       }
       cy.get('.cantidad').should('contain', '7');
@@ -76,52 +76,17 @@ describe('POS Carrito - Stock y Totales Reactivos', () => {
     });
   });
 
-  it('debe mostrar "Sin stock" y controles inhabilitados para stock 0', () => {
-    cy.visit('/login');
-    cy.wait('@salud');
-    cy.get('#login-email input').clear().type('vendedor@rockstar.cl');
-    cy.get('#login-password input').clear().type('password123');
-    cy.get('ion-button[type="submit"]').click();
-    cy.wait('@login');
-    cy.wait('@catalogo');
+  it('debe marcar "Sin stock" en la búsqueda y no agregarlo al carrito', () => {
+    cy.get('.scan-input').type('poster');
+    cy.get('.buscador-opcion.sin-stock').should('contain', 'Sin stock').click();
 
-    cy.get('ion-card.product-card.sin-stock').should('exist');
-    cy.get('ion-card.product-card.sin-stock').scrollIntoView().within(() => {
-      cy.contains('Sin stock').should('be.visible');
-      cy.get('.product-stepper ion-button').last().should('have.class', 'button-disabled');
-      cy.get('.product-stepper ion-button').first().should('have.class', 'button-disabled');
-    });
-  });
-
-  it('no debe permitir agregar producto con stock 0 al carrito', () => {
-    cy.visit('/login');
-    cy.wait('@salud');
-    cy.get('#login-email input').clear().type('vendedor@rockstar.cl');
-    cy.get('#login-password input').clear().type('password123');
-    cy.get('ion-button[type="submit"]').click();
-    cy.wait('@login');
-    cy.wait('@catalogo');
-
-    cy.get('ion-card.product-card.sin-stock').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click({ force: true });
-    });
-
+    cy.get('ion-card.product-card').should('not.exist');
     cy.get('.carrito-vacio').should('be.visible');
   });
 
   it('debe actualizar detalle y total sin recargar la página', () => {
-    cy.visit('/login');
-    cy.wait('@salud');
-    cy.get('#login-email input').clear().type('vendedor@rockstar.cl');
-    cy.get('#login-password input').clear().type('password123');
-    cy.get('ion-button[type="submit"]').click();
-    cy.wait('@login');
-    cy.wait('@catalogo');
-
     const initialTotal = '$0';
-    cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click();
-    });
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
     cy.get('.carrito-total strong').should('contain', '$15.000');
 
     cy.get('ion-card.product-card').first().within(() => {

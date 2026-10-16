@@ -36,7 +36,7 @@ describe('POS - Login Cliente para Checkout', () => {
     }).as('retorno');
   });
 
-  it('debe abrir modal cliente al cobrar sin sesión cliente', () => {
+  it('cobrar no exige cliente: se identifica, si se quiere, desde el cobro', () => {
     cy.visit('/login');
     cy.wait('@salud');
     cy.get('#login-email input').clear().type('vendedor@rockstar.cl');
@@ -44,13 +44,14 @@ describe('POS - Login Cliente para Checkout', () => {
     cy.get('ion-button[type="submit"]').click();
     cy.wait('@login');
     cy.wait('@catalogo');
-    
-    cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click();
-    });
-    
+
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
+
     cy.get('ion-button.cobrar-button').click();
-    cy.contains('Identificar cliente').should('be.visible');
+    cy.contains('Medio de pago').should('be.visible');
+    cy.get('.cobro-cliente').should('contain', 'Venta sin cliente');
+    cy.contains('ion-button', 'Identificar cliente').click();
+    cy.get('.cliente-form #cliente-email').should('be.visible');
   });
 
   it('debe permitir login de cliente con credenciales válidas (rol CLIENTE)', () => {
@@ -62,13 +63,12 @@ describe('POS - Login Cliente para Checkout', () => {
     cy.wait('@login');
     cy.wait('@catalogo');
     
-    cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click();
-    });
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
     
     cy.get('ion-button.cobrar-button').click();
     
-    cy.get('ion-modal[is-open]').within(() => {
+    cy.contains('ion-button', 'Identificar cliente').click();
+    cy.get('.cliente-form').within(() => {
       cy.get('#cliente-email input').clear().type('cliente@rockstar.cl');
       cy.get('#cliente-password input').clear().type('password123');
       cy.get('ion-button[type="submit"]').click();
@@ -76,6 +76,7 @@ describe('POS - Login Cliente para Checkout', () => {
     
     cy.wait('@login');
     cy.contains('Medio de pago').should('be.visible');
+    cy.get('.cobro-cliente').should('contain', 'Cliente Mostrador');
   });
 
   it('debe mostrar error si rol no es CLIENTE', () => {
@@ -87,9 +88,7 @@ describe('POS - Login Cliente para Checkout', () => {
     cy.wait('@login');
     cy.wait('@catalogo');
 
-    cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click();
-    });
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
 
     cy.get('ion-button.cobrar-button').click();
 
@@ -99,7 +98,8 @@ describe('POS - Login Cliente para Checkout', () => {
       body: { mensaje: 'La cuenta debe ser de rol CLIENTE' }
     }).as('loginClienteFail');
 
-    cy.get('ion-modal[is-open]').within(() => {
+    cy.contains('ion-button', 'Identificar cliente').click();
+    cy.get('.cliente-form').within(() => {
       cy.get('#cliente-email input').clear().type('vendedor@rockstar.cl');
       cy.get('#cliente-password input').clear().type('password123');
       cy.get('ion-button[type="submit"]').click();

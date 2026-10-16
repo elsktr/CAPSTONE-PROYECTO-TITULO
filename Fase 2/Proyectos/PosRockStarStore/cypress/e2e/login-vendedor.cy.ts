@@ -33,7 +33,8 @@ describe('POS - Login Vendedor', () => {
     cy.wait('@login');
     cy.url().should('include', '/pos');
     cy.wait('@catalogo');
-    cy.get('ion-card.product-card').should('have.length.at.least', 1);
+    cy.get('.scan-input').should('be.visible');
+    cy.get('.venta-vacia').should('be.visible');
   });
 
   it('debe mostrar error inline con credenciales inválidas', () => {

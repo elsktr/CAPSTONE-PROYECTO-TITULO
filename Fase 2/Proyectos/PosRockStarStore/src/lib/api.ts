@@ -162,6 +162,28 @@ export async function buscarVariantes(
   return (await leerJson(res)) as VarianteGestion[];
 }
 
+/** Variante leida por escaneo. Solo los campos que usa el POS. */
+export interface VarianteEscaneada {
+  idVariante: number;
+  sku: string;
+  codigo: string;
+  producto: string;
+  talla: string;
+  color: string;
+  disponible: number;
+}
+
+/**
+ * GET /inventario/variantes/por-codigo/:codigo (VENDEDOR, BODEGA, GERENTE): acepta el
+ * codigo de barras de la etiqueta o el SKU que lleva su QR. Responde 404 si no existe.
+ */
+export async function buscarPorCodigo(accessToken: string, codigo: string): Promise<VarianteEscaneada> {
+  const res = await fetch(`${BASE}/inventario/variantes/por-codigo/${encodeURIComponent(codigo)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return (await leerJson(res)) as VarianteEscaneada;
+}
+
 /**
  * Medios con que se cobra en la tienda. La tarjeta se pasa por el terminal fisico:
  * el POS solo registra el medio, no hay pasarela (Webpay es solo de la tienda web).
@@ -175,12 +197,22 @@ export interface LineaVentaPos {
   permitirBodega?: boolean;
 }
 
+/** Pago con tarjeta aprobado en la maquina de cobro. Nunca lleva el numero de la tarjeta. */
+export interface PagoMaquina {
+  /** Un cobro paga una sola venta: si ya pago otra, el backend responde COBRO_YA_USADO. */
+  idCobro: string;
+  codigoAutorizacion: string;
+  ultimosDigitos?: string | null;
+}
+
 export interface VentaPosRequest {
   /** UUID por venta: reenviarlo no crea otra venta. */
   claveIdempotencia: string;
   lineas: LineaVentaPos[];
   medioPago: MedioPresencial;
   idCliente?: number;
+  /** Solo si la tarjeta se cobro en la maquina: el backend guarda la autorizacion con la venta. */
+  pagoMaquina?: PagoMaquina;
 }
 
 /** Detalle del rechazo EXISTENCIA_EN_BODEGA: lineas que la sala no alcanza. */
@@ -211,6 +243,8 @@ export interface ComprobantePos {
   vendedor: string;
   cliente: string | null;
   medioPago: { codigo: MedioPresencial; nombre: string };
+  /** Autorizacion guardada de la maquina de cobro; null en efectivo o terminal aparte. */
+  pagoMaquina: { codigoAutorizacion: string; ultimosDigitos: string | null } | null;
   lineas: LineaComprobantePos[];
   total: number;
 }
