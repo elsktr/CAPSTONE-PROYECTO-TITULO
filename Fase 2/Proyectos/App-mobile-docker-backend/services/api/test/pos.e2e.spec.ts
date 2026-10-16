@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { PGlite } from '@electric-sql/pglite';
 import type {
+  BalanceDia,
   CheckoutResponse,
   Comuna,
   ComprobantePos,
@@ -243,6 +244,41 @@ describe('ventas de todos los canales (Finanzas)', () => {
 
     for (const token of [vendedor, bodega, cliente]) {
       expect((await llamar<ErrorApi>('GET', '/ventas', undefined, token)).status).toBe(403);
+    }
+  });
+});
+
+describe('balance diario (Finanzas)', () => {
+  it('suma al día las ventas por canal, el costo de sus prendas y las mermas a su costo', async () => {
+    const hoy = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Santiago' });
+    const delDia = async () =>
+      (await llamar<BalanceDia[]>('GET', `/finanzas/balance?desde=${hoy}`, undefined, gerente)).cuerpo.find((d) => d.fecha === hoy) ?? {
+        fecha: hoy, ingresoWeb: 0, ingresoPos: 0, costoPrendas: 0, despacho: 0, comisiones: 0, mermas: 0,
+      };
+    const [{ costo }] = await filas<{ costo: number }>(
+      'SELECT p.costo_compra AS costo FROM inventario.variantes v JOIN inventario.productos p USING (id_producto) WHERE v.id_variante = $1',
+      [RAYO],
+    );
+    const antes = await delDia();
+
+    await vender({ lineas: [{ idVariante: RAYO, cantidad: 1, permitirBodega: true }] });
+    const merma = await llamar(
+      'POST',
+      '/inventario/movimientos/mermas',
+      { claveIdempotencia: randomUUID(), idVariante: RAYO, ubicacion: 'BODEGA', cantidad: 2, tipoMerma: 'DANADO', motivo: 'Prueba de balance' },
+      bodega,
+    );
+    expect(merma.status).toBe(201);
+
+    const despues = await delDia();
+    expect(despues.ingresoPos - antes.ingresoPos).toBe(14990);
+    expect(despues.ingresoWeb).toBe(antes.ingresoWeb);
+    expect(despues.costoPrendas - antes.costoPrendas).toBe(costo);
+    expect(despues.mermas - antes.mermas).toBe(2 * costo);
+
+    expect((await llamar<ErrorApi>('GET', '/finanzas/balance?desde=hoy', undefined, gerente)).status).toBe(400);
+    for (const token of [vendedor, bodega, cliente]) {
+      expect((await llamar<ErrorApi>('GET', '/finanzas/balance', undefined, token)).status).toBe(403);
     }
   });
 });

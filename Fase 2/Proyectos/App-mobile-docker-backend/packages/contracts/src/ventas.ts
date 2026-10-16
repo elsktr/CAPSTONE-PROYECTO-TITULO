@@ -170,3 +170,26 @@ export interface VentaResumen {
   /** Nombre del medio de pago, si ya se conoce. */
   medioPago: string | null;
 }
+
+/**
+ * Ingresos y gastos de un día, en hora de Chile. GET /finanzas/balance (Gerente)
+ *
+ * Solo los días con ventas o mermas, del más reciente al más antiguo. Con
+ * `?desde=AAAA-MM-DD`, solo desde ese día. Ganancia = ingresos − gastos.
+ */
+export interface BalanceDia {
+  /** AAAA-MM-DD. */
+  fecha: string;
+  /** Ventas web pagadas ese día, con el flete cobrado. */
+  ingresoWeb: number;
+  /** Ventas del POS ese día. */
+  ingresoPos: number;
+  /** Lo que costaron las prendas vendidas ese día, a su costo de compra. */
+  costoPrendas: number;
+  /** Lo que cobró Starken por despachar las ventas de ese día; 0 mientras no se despachan. */
+  despacho: number;
+  /** Comisiones de los medios de pago de las ventas de ese día. */
+  comisiones: number;
+  /** Prendas dadas de baja ese día, a su costo de compra. */
+  mermas: number;
+}

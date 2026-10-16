@@ -17,28 +17,30 @@ import {
   globeOutline,
   storefrontOutline,
   trendingUpOutline,
+  trendingDownOutline,
   speedometerOutline,
+  walletOutline,
+  calendarOutline,
 } from 'ionicons/icons';
-import type { Rol, VentaResumen } from '@rockstar/contracts';
+import type { BalanceDia, Rol, VentaResumen } from '@rockstar/contracts';
 import { errorMessage } from '../../core/api';
 import { formatCLP, roleLabel } from '../../data/models';
 import { AdminService, SalesPeriod, periodStart } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
 import { CartService } from '../../services/cart.service';
 
-/** Ventas que se muestran de una vez en la lista. */
-const PAGE_SIZE = 10;
-/** Días que muestra como máximo el gráfico de ventas por día. */
+/** Filas que se muestran de una vez en cada lista. */
+const PAGE_SIZE = 5;
+/** Días que muestra como máximo el gráfico. */
 const CHART_MAX_DAYS = 60;
 const DAY_MS = 86_400_000;
 
-/** Ventas de un día, separadas por canal, para el gráfico. */
+/** Ingresos y gastos de un día del gráfico; los días sin movimiento van en cero. */
 interface DayBar {
   day: string;
   label: string;
-  web: number;
-  pos: number;
-  total: number;
+  income: number;
+  spent: number;
 }
 
 /** Fecha de Chile (AAAA-MM-DD) de un instante. */
@@ -56,6 +58,9 @@ function daysBetween(from: string, to: string): string[] {
   return days;
 }
 
+const income = (d: BalanceDia) => d.ingresoWeb + d.ingresoPos;
+const spent = (d: BalanceDia) => d.costoPrendas + d.despacho + d.comisiones + d.mermas;
+
 /** Semáforo de un porcentaje: bien, atención o mal. */
 type Level = 'ok' | 'warn' | 'bad';
 const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 50 ? 'warn' : 'bad');
@@ -71,26 +76,10 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
           <div>
             <div class="eyebrow"><ion-icon name="stats-chart-outline"></ion-icon> Backoffice</div>
             <h1>Finanzas <span class="amp">&</span> RRHH</h1>
-            <p>Vista ejecutiva de ventas, mermas y permisos.</p>
+            <p>Vista ejecutiva de ventas, gastos, mermas y permisos.</p>
           </div>
-          <ion-button class="btn-outline logout" (click)="logout()">
-            <ion-icon slot="start" name="log-out-outline"></ion-icon>
-            Cerrar sesión
-          </ion-button>
-        </header>
-
-        <div class="load-error" *ngIf="error()" role="alert">
-          <p>{{ error() }}</p>
-          <ion-button class="btn-rockstar" [disabled]="loading()" (click)="load()">Reintentar</ion-button>
-        </div>
-
-        <section class="panel sales" aria-labelledby="ventas-titulo">
-          <div class="panel-head">
-            <div>
-              <h2 id="ventas-titulo">Ventas</h2>
-              <p>Ventas pagadas de la tienda web y de la tienda física (POS).</p>
-            </div>
-            <div class="periods" role="group" aria-label="Período de las ventas">
+          <div class="hero-actions">
+            <div class="periods" role="group" aria-label="Período">
               <button
                 *ngFor="let p of periods"
                 type="button"
@@ -102,64 +91,139 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
                 {{ p.label }}
               </button>
             </div>
+            <ion-button class="btn-outline logout" (click)="logout()">
+              <ion-icon slot="start" name="log-out-outline"></ion-icon>
+              Cerrar sesión
+            </ion-button>
+          </div>
+        </header>
+
+        <div class="load-error" *ngIf="error()" role="alert">
+          <p>{{ error() }}</p>
+          <ion-button class="btn-rockstar" [disabled]="loading()" (click)="load()">Reintentar</ion-button>
+        </div>
+
+        <!-- Balance diario: ingresos de ambas tiendas contra los gastos -->
+        <section class="panel" aria-labelledby="balance-titulo">
+          <div class="panel-head">
+            <div>
+              <h2 id="balance-titulo">Balance diario</h2>
+              <p>Ingresos de ambas tiendas y gastos: costo de las prendas vendidas, despacho, comisiones y mermas.</p>
+            </div>
+            <span class="badge ok"><ion-icon name="wallet-outline" aria-hidden="true"></ion-icon></span>
           </div>
 
           <div class="kpis">
-            <div class="kpi kpi-total">
-              <span class="kpi-label"><ion-icon name="trending-up-outline" aria-hidden="true"></ion-icon> Total vendido</span>
-              <strong>{{ formatCLP(admin.allSales().total) }}</strong>
-              <small>
-                {{ countLabel(admin.allSales().count) }}<ng-container *ngIf="admin.allSales().count > 0">
-                  · ticket promedio {{ formatCLP(averageTicket()) }}</ng-container>
-              </small>
+            <div class="kpi kpi-income">
+              <span class="kpi-label"><ion-icon name="trending-up-outline" aria-hidden="true"></ion-icon> Ingresos</span>
+              <strong>{{ formatCLP(totals().income) }}</strong>
+              <small>Web {{ formatCLP(totals().web) }} · Tienda física {{ formatCLP(totals().pos) }}</small>
             </div>
-            <div class="kpi kpi-web">
-              <span class="kpi-label"><span class="badge"><ion-icon name="globe-outline" aria-hidden="true"></ion-icon></span> Tienda web</span>
-              <strong>{{ formatCLP(admin.webSales().total) }}</strong>
-              <small>
-                {{ countLabel(admin.webSales().count) }}<ng-container *ngIf="admin.shippingCharged() > 0">
-                  · incluye {{ formatCLP(admin.shippingCharged()) }} de despacho</ng-container>
-              </small>
+            <div class="kpi kpi-spent">
+              <span class="kpi-label"><ion-icon name="trending-down-outline" aria-hidden="true"></ion-icon> Gastos</span>
+              <strong>{{ formatCLP(totals().spent) }}</strong>
+              <small>{{ totals().income ? ((totals().spent / totals().income) * 100).toFixed(0) + '% de los ingresos' : 'Sin ingresos en el período' }}</small>
             </div>
-            <div class="kpi kpi-pos">
-              <span class="kpi-label"><span class="badge"><ion-icon name="storefront-outline" aria-hidden="true"></ion-icon></span> Tienda física (POS)</span>
-              <strong>{{ formatCLP(admin.storeSales().total) }}</strong>
-              <small>{{ countLabel(admin.storeSales().count) }}</small>
+            <div class="kpi kpi-profit" [class.loss]="totals().profit < 0">
+              <span class="kpi-label"><ion-icon name="wallet-outline" aria-hidden="true"></ion-icon> Ganancia</span>
+              <strong>{{ formatCLP(totals().profit) }}</strong>
+              <small>Margen {{ totals().margin.toFixed(0) }}%</small>
             </div>
           </div>
 
-          <figure class="chart" *ngIf="chart().length > 1" aria-label="Ventas por día">
+          <div class="expenses" *ngIf="totals().spent > 0">
+            <div class="expense-bar" aria-hidden="true">
+              <div *ngFor="let e of expenseParts()" [class]="'part ' + e.key" [style.flex-grow]="e.value"></div>
+            </div>
+            <div class="legend">
+              <span *ngFor="let e of expenseParts()"><i [class]="'dot ' + e.key"></i> {{ e.label }} {{ formatCLP(e.value) }}</span>
+            </div>
+          </div>
+
+          <figure class="chart" *ngIf="chart().length > 1" aria-label="Ingresos y gastos por día">
             <div class="bars">
               <div
                 class="bar-col"
                 *ngFor="let d of chart(); let i = index"
-                [attr.title]="d.label + ': web ' + formatCLP(d.web) + ' · POS ' + formatCLP(d.pos)"
+                [attr.title]="d.label + ': ingresos ' + formatCLP(d.income) + ' · gastos ' + formatCLP(d.spent)"
               >
-                <div class="stack" [style.height.%]="barHeight(d)">
-                  <div class="seg pos" [style.flex-grow]="d.pos"></div>
-                  <div class="seg web" [style.flex-grow]="d.web"></div>
+                <div class="pair">
+                  <div class="b income" [style.height.%]="barHeight(d.income)"></div>
+                  <div class="b spent" [style.height.%]="barHeight(d.spent)"></div>
                 </div>
                 <span class="tick" *ngIf="showTick(i)">{{ d.label }}</span>
               </div>
             </div>
             <figcaption class="legend">
-              <span><i class="dot web"></i> Web {{ webShare().toFixed(0) }}%</span>
-              <span><i class="dot pos"></i> POS {{ (100 - webShare()).toFixed(0) }}%</span>
-              <span class="legend-note">Ventas por día</span>
+              <span><i class="dot income"></i> Ingresos</span>
+              <span><i class="dot spent"></i> Gastos</span>
+              <span class="legend-note">Por día</span>
             </figcaption>
           </figure>
 
-          <ng-container *ngIf="chart().length <= 1 && admin.allSales().total > 0">
-            <div class="share" aria-hidden="true"><div class="share-web" [style.width.%]="webShare()"></div></div>
-            <div class="legend">
-              <span><i class="dot web"></i> Web {{ webShare().toFixed(0) }}%</span>
-              <span><i class="dot pos"></i> POS {{ (100 - webShare()).toFixed(0) }}%</span>
+          <div class="days" *ngIf="admin.balance().length > 0; else noDays">
+            <div class="day-row head" aria-hidden="true">
+              <span>Día</span><span>Web</span><span>Tienda física</span><span>Gastos</span><span>Ganancia</span>
             </div>
-          </ng-container>
+            <div class="day-row" *ngFor="let d of visibleDays()">
+              <span class="day-date"><ion-icon name="calendar-outline" aria-hidden="true"></ion-icon> {{ dayLabel(d.fecha) }}</span>
+              <span class="web" data-label="Web">{{ formatCLP(d.ingresoWeb) }}</span>
+              <span class="pos" data-label="Tienda física">{{ formatCLP(d.ingresoPos) }}</span>
+              <span class="spent" data-label="Gastos" [attr.title]="expenseDetail(d)">−{{ formatCLP(spentOf(d)) }}</span>
+              <strong class="profit" data-label="Ganancia" [class.loss]="profitOf(d) < 0">{{ formatCLP(profitOf(d)) }}</strong>
+            </div>
+            <button type="button" class="more" *ngIf="admin.balance().length > visibleDays().length" (click)="shownDays.set(shownDays() + 7)">
+              Ver más días ({{ admin.balance().length - visibleDays().length }})
+            </button>
+          </div>
+          <ng-template #noDays>
+            <p class="empty">{{ salesLoading() ? 'Cargando…' : 'No hay ventas ni mermas en este período.' }}</p>
+          </ng-template>
+        </section>
 
-          <div class="sales-list" *ngIf="admin.sales().length > 0; else noSales">
-            <div class="sale-row" *ngFor="let v of visibleSales(); trackBy: trackSale" [class.pos]="v.canal === 'POS'">
-              <span class="channel">{{ v.canal === 'POS' ? 'POS' : 'Web' }}</span>
+        <!-- Cada tienda por separado -->
+        <div class="channels">
+          <section class="panel channel web" aria-labelledby="web-titulo">
+            <div class="panel-head">
+              <div>
+                <h2 id="web-titulo">Tienda web <span class="sub">e-commerce</span></h2>
+                <p>Compras pagadas en la página, con despacho.</p>
+              </div>
+              <span class="badge"><ion-icon name="globe-outline" aria-hidden="true"></ion-icon></span>
+            </div>
+            <div class="mini-kpis">
+              <div><span>Vendido</span><strong class="accent">{{ formatCLP(admin.webSales().total) }}</strong></div>
+              <div><span>Ventas</span><strong>{{ admin.webSales().count }}</strong></div>
+              <div><span>Ticket promedio</span><strong>{{ formatCLP(average(admin.webSales())) }}</strong></div>
+              <div><span>Despacho cobrado</span><strong>{{ formatCLP(admin.shippingCharged()) }}</strong></div>
+            </div>
+            <ng-container *ngTemplateOutlet="saleList; context: { $implicit: webList(), shown: shownWeb, kind: 'web' }"></ng-container>
+          </section>
+
+          <section class="panel channel pos" aria-labelledby="pos-titulo">
+            <div class="panel-head">
+              <div>
+                <h2 id="pos-titulo">Tienda física <span class="sub">POS</span></h2>
+                <p>Ventas en caja, pagadas en el local.</p>
+              </div>
+              <span class="badge"><ion-icon name="storefront-outline" aria-hidden="true"></ion-icon></span>
+            </div>
+            <div class="mini-kpis">
+              <div><span>Vendido</span><strong class="accent">{{ formatCLP(admin.storeSales().total) }}</strong></div>
+              <div><span>Ventas</span><strong>{{ admin.storeSales().count }}</strong></div>
+              <div><span>Ticket promedio</span><strong>{{ formatCLP(average(admin.storeSales())) }}</strong></div>
+              <div><span>Unidades</span><strong>{{ posUnits() }}</strong></div>
+            </div>
+            <div class="methods" *ngIf="posMethods().length > 0">
+              <span class="method" *ngFor="let m of posMethods()">{{ m.name }} <strong>{{ formatCLP(m.total) }}</strong></span>
+            </div>
+            <ng-container *ngTemplateOutlet="saleList; context: { $implicit: posList(), shown: shownPos, kind: 'pos' }"></ng-container>
+          </section>
+        </div>
+
+        <ng-template #saleList let-sales let-shown="shown" let-kind="kind">
+          <div class="sales-list" *ngIf="sales.length > 0; else noSales">
+            <div class="sale-row" *ngFor="let v of sales.slice(0, shown()); trackBy: trackSale">
               <div class="sale-main">
                 <div class="sale-title">Venta #{{ v.idVenta }} · {{ who(v) }}</div>
                 <div class="sale-meta">
@@ -169,14 +233,14 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
               </div>
               <strong class="sale-total">{{ formatCLP(v.total) }}</strong>
             </div>
-            <button type="button" class="more" *ngIf="admin.sales().length > visibleSales().length" (click)="showMore()">
-              Ver más ventas ({{ admin.sales().length - visibleSales().length }})
+            <button type="button" class="more" *ngIf="sales.length > shown()" (click)="shown.set(shown() + PAGE_SIZE)">
+              Ver más ({{ sales.length - shown() }})
             </button>
           </div>
           <ng-template #noSales>
-            <p class="empty">{{ salesLoading() ? 'Cargando ventas…' : 'No hay ventas en este período.' }}</p>
+            <p class="empty">{{ salesLoading() ? 'Cargando…' : (kind === 'web' ? 'No hay ventas web en este período.' : 'No hay ventas en la tienda física en este período.') }}</p>
           </ng-template>
-        </section>
+        </ng-template>
 
         <div class="stats">
           <div class="stat-card info">
@@ -248,13 +312,15 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
       --c-ok: #34d399;
       --c-bad: #f43f5e;
       --c-violet: #a78bfa;
+      --c-income: #34d399;
+      --c-spent: #fb923c;
       --panel: #131316;
       --panel-line: #26262b;
     }
     .dash { max-width: 1200px; margin: 0 auto; }
 
     .hero {
-      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px;
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px;
       margin-bottom: 20px; padding: 24px; border-radius: 20px;
       background:
         radial-gradient(120% 140% at 0% 0%, rgba(244, 63, 94, 0.28), transparent 55%),
@@ -269,22 +335,25 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
     .hero h1 { margin: 8px 0 6px; font-size: 30px; font-weight: 900; letter-spacing: -0.01em; }
     .hero .amp { color: var(--c-pos); }
     .hero p { margin: 0; color: var(--text-muted); font-size: 14px; }
+    .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .logout { margin: 0; }
 
     .load-error { text-align: center; padding: 16px; color: var(--text-muted); }
 
-    .panel { background: var(--panel); border: 1px solid var(--panel-line); border-radius: 18px; padding: 20px; }
-    .panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+    .panel { background: var(--panel); border: 1px solid var(--panel-line); border-radius: 18px; padding: 20px; margin-bottom: 20px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
     .panel-head h2 { margin: 0; font-size: 17px; font-weight: 800; }
+    .panel-head h2 .sub { margin-left: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--c, var(--text-faint)); }
     .panel-head p { margin: 4px 0 0; font-size: 12px; color: var(--text-faint); }
-    .sales { margin-bottom: 20px; }
 
     .badge {
-      display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 9px;
+      --c: var(--text-muted);
+      flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 9px;
       font-size: 16px; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent);
     }
     .badge.info { --c: var(--c-info); }
     .badge.violet { --c: var(--c-violet); }
+    .badge.ok { --c: var(--c-ok); }
 
     .periods { display: flex; gap: 4px; padding: 4px; background: #0b0b0d; border: 1px solid var(--panel-line); border-radius: 12px; }
     .periods button {
@@ -297,68 +366,104 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
     .periods button:focus-visible, .more:focus-visible { outline: 2px solid var(--c-pos); outline-offset: 2px; }
 
     .kpis { display: grid; grid-template-columns: 1fr; gap: 12px; }
-    @media (min-width: 768px) { .kpis { grid-template-columns: 1.3fr 1fr 1fr; } }
+    @media (min-width: 768px) { .kpis { grid-template-columns: 1fr 1fr 1.2fr; } }
     .kpi {
-      --c: var(--text-muted);
       display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 14px;
-      background: color-mix(in srgb, var(--c) 7%, #0e0e11);
-      border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+      background: color-mix(in srgb, var(--c) 8%, #0e0e11);
+      border: 1px solid color-mix(in srgb, var(--c) 32%, transparent);
     }
-    .kpi-web { --c: var(--c-web); }
-    .kpi-pos { --c: var(--c-pos); }
-    .kpi .badge { width: 24px; height: 24px; font-size: 13px; border-radius: 7px; }
+    .kpi-income { --c: var(--c-income); }
+    .kpi-spent { --c: var(--c-spent); }
     .kpi-label {
       display: inline-flex; align-items: center; gap: 8px;
       font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted);
     }
-    .kpi strong { font-size: 24px; font-weight: 900; color: #fff; }
-    .kpi-web strong, .kpi-pos strong { color: var(--c); }
+    .kpi-label ion-icon { color: var(--c); font-size: 15px; }
+    .kpi strong { font-size: 24px; font-weight: 900; color: var(--c); }
     .kpi small { font-size: 11px; color: var(--text-faint); }
-    .kpi-total {
-      border: none; color: #fff;
-      background: linear-gradient(135deg, #be123c 0%, #e11d48 45%, #f97316 100%);
-      box-shadow: 0 10px 30px rgba(225, 29, 72, 0.25);
+    .kpi-profit {
+      --c: #fff; border: none;
+      background: linear-gradient(135deg, #047857 0%, #059669 45%, #10b981 100%);
+      box-shadow: 0 10px 30px rgba(16, 185, 129, 0.22);
     }
-    .kpi-total .kpi-label, .kpi-total small { color: rgba(255, 255, 255, 0.85); }
-    .kpi-total strong { font-size: 30px; }
+    .kpi-profit.loss { background: linear-gradient(135deg, #9f1239, #e11d48); box-shadow: 0 10px 30px rgba(225, 29, 72, 0.25); }
+    .kpi-profit .kpi-label, .kpi-profit small, .kpi-profit .kpi-label ion-icon { color: rgba(255, 255, 255, 0.88); }
+    .kpi-profit strong { font-size: 30px; }
+
+    .expenses { margin-top: 16px; }
+    .expense-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: #0b0b0d; }
+    .part { flex-basis: 0; }
+    .part.garments, .dot.garments { background: #fb923c; }
+    .part.shipping, .dot.shipping { background: #38bdf8; }
+    .part.fees, .dot.fees { background: #a78bfa; }
+    .part.losses, .dot.losses { background: #f43f5e; }
 
     .chart { margin: 18px 0 0; }
     .bars { display: flex; align-items: flex-end; gap: 3px; height: 140px; padding: 0 2px; border-bottom: 1px solid var(--panel-line); }
     .bar-col { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
-    .stack {
-      width: 100%; min-height: 0; display: flex; flex-direction: column; border-radius: 4px 4px 0 0; overflow: hidden;
-      transition: height 0.4s;
-    }
-    .bar-col:hover .stack { filter: brightness(1.25); }
-    .seg { flex-basis: 0; }
-    .seg.web { background: linear-gradient(180deg, #fb7185, var(--c-web)); }
-    .seg.pos { background: linear-gradient(180deg, #fcd34d, var(--c-pos)); }
+    .pair { width: 100%; height: 100%; display: flex; align-items: flex-end; gap: 1px; }
+    .b { flex: 1; border-radius: 3px 3px 0 0; transition: height 0.4s; }
+    .b.income { background: linear-gradient(180deg, #6ee7b7, var(--c-income)); }
+    .b.spent { background: linear-gradient(180deg, #fdba74, var(--c-spent)); }
+    .bar-col:hover .b { filter: brightness(1.25); }
     .tick {
       position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%);
       font-size: 9px; color: var(--text-faint); white-space: nowrap;
     }
-    .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 22px; font-size: 11px; color: var(--text-muted); }
+    .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
+    .chart .legend { margin-top: 22px; }
     .legend-note { margin-left: auto; color: var(--text-faint); }
     .dot { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; }
-    .dot.web { background: var(--c-web); }
-    .dot.pos { background: var(--c-pos); }
-    .share { display: flex; height: 8px; margin-top: 18px; background: var(--c-pos); border-radius: 999px; overflow: hidden; }
-    .share-web { background: var(--c-web); transition: width 0.4s; }
-    .share + .legend { margin-top: 8px; }
+    .dot.income { background: var(--c-income); }
+    .dot.spent { background: var(--c-spent); }
 
-    .sales-list { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+    .days { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
+    .day-row {
+      display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr; align-items: center; gap: 8px;
+      padding: 10px 12px; border-radius: 10px; background: #0e0e11; border: 1px solid var(--panel-line);
+      font-size: 13px; text-align: right;
+    }
+    .day-row > :first-child { text-align: left; }
+    .day-row.head { background: transparent; border: none; padding: 0 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); }
+    .day-date { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+    .day-date ion-icon { color: var(--text-faint); }
+    .day-row .web { color: #fda4af; }
+    .day-row .pos { color: #fcd34d; }
+    .day-row .spent { color: var(--c-spent); }
+    .day-row .profit { color: var(--c-income); }
+    .day-row .profit.loss { color: var(--c-bad); }
+    @media (max-width: 640px) {
+      .day-row.head { display: none; }
+      .day-row { grid-template-columns: 1fr 1fr; text-align: left; }
+      .day-row > :first-child { grid-column: 1 / -1; }
+      .day-row [data-label]::before { content: attr(data-label); display: block; font-size: 10px; color: var(--text-faint); }
+    }
+
+    .channels { display: grid; grid-template-columns: 1fr; gap: 0 20px; }
+    @media (min-width: 1024px) { .channels { grid-template-columns: 1fr 1fr; } }
+    .channel.web { --c: var(--c-web); border-top: 3px solid var(--c-web); }
+    .channel.pos { --c: var(--c-pos); border-top: 3px solid var(--c-pos); }
+    .channel .badge { --c: inherit; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); }
+    .mini-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    @media (min-width: 480px) { .mini-kpis { grid-template-columns: repeat(4, 1fr); } }
+    .mini-kpis > div { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 12px; background: #0e0e11; border: 1px solid var(--panel-line); }
+    .mini-kpis span { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); }
+    .mini-kpis strong { font-size: 15px; font-weight: 800; }
+    .mini-kpis strong.accent { color: var(--c); font-size: 17px; }
+    .methods { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .method {
+      padding: 4px 10px; border-radius: 999px; font-size: 11px; color: var(--text-muted);
+      background: color-mix(in srgb, var(--c) 12%, transparent); border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+    }
+    .method strong { color: var(--c); margin-left: 4px; }
+
+    .sales-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
     .sale-row {
-      --c: var(--c-web);
       display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px;
       background: #0e0e11; border: 1px solid var(--panel-line); border-left: 3px solid var(--c);
-      transition: border-color 0.15s, background 0.15s;
+      transition: background 0.15s;
     }
-    .sale-row.pos { --c: var(--c-pos); }
     .sale-row:hover { background: #151519; }
-    .channel {
-      flex: none; min-width: 40px; padding: 3px 8px; text-align: center; border-radius: 999px;
-      background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); font-size: 10px; font-weight: 800;
-    }
     .sale-main { flex: 1; min-width: 0; }
     .sale-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sale-meta { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
@@ -380,12 +485,12 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
     .stat-card.info { --c: var(--c-info); }
     .stat-card.warn { --c: var(--c-warn); }
     .stat-card.ok { --c: var(--c-ok); }
-    .stat-card .badge { position: absolute; top: 16px; right: 16px; }
+    .stat-card .badge { position: absolute; top: 16px; right: 16px; --c: inherit; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); }
     .stat-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
     .stat-value { font-size: 26px; font-weight: 900; margin: 14px 0 4px; color: var(--c); }
     .stat-note { font-size: 11px; color: var(--text-faint); }
 
-    .grid-2 { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr; gap: 0 20px; }
     @media (min-width: 1024px) { .grid-2 { grid-template-columns: 3fr 2fr; } }
 
     .progress-list { display: flex; flex-direction: column; gap: 18px; }
@@ -427,7 +532,7 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
     @media (max-width: 480px) {
       .hero { padding: 18px; }
       .hero h1 { font-size: 24px; }
-      .kpi-total strong { font-size: 26px; }
+      .kpi-profit strong { font-size: 26px; }
       .bars { height: 110px; gap: 2px; }
     }
   `],
@@ -440,6 +545,7 @@ export class AdminPage {
 
   formatCLP = formatCLP;
   roleLabel = roleLabel;
+  readonly PAGE_SIZE = PAGE_SIZE;
   loading = signal(false);
   error = signal('');
 
@@ -451,41 +557,54 @@ export class AdminPage {
   ];
   period = signal<SalesPeriod>('month');
   salesLoading = signal(false);
-  private readonly shown = signal(PAGE_SIZE);
-  visibleSales = computed(() => this.admin.sales().slice(0, this.shown()));
-  /** Parte del total vendido que entró por la tienda web. */
-  webShare = computed(() => {
-    const all = this.admin.allSales().total;
-    return all ? (this.admin.webSales().total / all) * 100 : 0;
-  });
-  averageTicket = computed(() => {
-    const { total, count } = this.admin.allSales();
-    return count ? Math.round(total / count) : 0;
+
+  totals = this.admin.balanceTotals;
+  shownDays = signal(7);
+  shownWeb = signal(PAGE_SIZE);
+  shownPos = signal(PAGE_SIZE);
+  visibleDays = computed(() => this.admin.balance().slice(0, this.shownDays()));
+  webList = computed(() => this.admin.sales().filter((s) => s.canal === 'ECOMMERCE'));
+  posList = computed(() => this.admin.sales().filter((s) => s.canal === 'POS'));
+  posUnits = computed(() => this.posList().reduce((sum, s) => sum + s.unidades, 0));
+
+  /** Lo vendido en la tienda física por medio de pago, de mayor a menor. */
+  posMethods = computed(() => {
+    const byMethod = new Map<string, number>();
+    for (const s of this.posList()) {
+      const name = s.medioPago ?? 'Sin medio';
+      byMethod.set(name, (byMethod.get(name) ?? 0) + s.total);
+    }
+    return [...byMethod].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total);
   });
 
-  /** Ventas por día del período, con los días sin ventas en cero. Vacío para "Hoy" (un solo día). */
+  /** Los gastos del período por tipo, sin los que están en cero. */
+  expenseParts = computed(() => {
+    const e = this.totals().expenses;
+    return [
+      { key: 'garments', label: 'Prendas vendidas', value: e.garments },
+      { key: 'shipping', label: 'Despacho', value: e.shipping },
+      { key: 'fees', label: 'Comisiones', value: e.fees },
+      { key: 'losses', label: 'Mermas', value: e.losses },
+    ].filter((p) => p.value > 0);
+  });
+
+  /** Ingresos y gastos por día del período, con los días sin movimiento en cero. Vacío para "Hoy". */
   chart = computed<DayBar[]>(() => {
-    const sales = this.admin.sales();
-    if (this.period() === 'today' || sales.length === 0) {
+    const balance = this.admin.balance();
+    if (this.period() === 'today' || balance.length === 0) {
       return [];
     }
     const today = chileDay(new Date());
-    const oldest = chileDay(new Date(sales[sales.length - 1]!.fecha));
+    const oldest = balance[balance.length - 1]!.fecha;
     const limit = chileDay(new Date(Date.now() - (CHART_MAX_DAYS - 1) * DAY_MS));
     const from = [periodStart(this.period()) ?? oldest, limit].sort().pop()!;
-    const bars = new Map<string, DayBar>(
-      daysBetween(from, today).map((day) => [day, { day, label: `${day.slice(8, 10)}/${day.slice(5, 7)}`, web: 0, pos: 0, total: 0 }]),
-    );
-    for (const sale of sales) {
-      const bar = bars.get(chileDay(new Date(sale.fecha)));
-      if (bar) {
-        bar[sale.canal === 'POS' ? 'pos' : 'web'] += sale.total;
-        bar.total += sale.total;
-      }
-    }
-    return [...bars.values()];
+    const byDay = new Map(balance.map((d) => [d.fecha, d]));
+    return daysBetween(from, today).map((day) => {
+      const d = byDay.get(day);
+      return { day, label: `${day.slice(8, 10)}/${day.slice(5, 7)}`, income: d ? income(d) : 0, spent: d ? spent(d) : 0 };
+    });
   });
-  private readonly chartMax = computed(() => Math.max(1, ...this.chart().map((d) => d.total)));
+  private readonly chartMax = computed(() => Math.max(1, ...this.chart().map((d) => Math.max(d.income, d.spent))));
 
   /** Indicadores del resumen operativo, con su color de semáforo. */
   indicators = computed(() =>
@@ -507,7 +626,10 @@ export class AdminPage {
       'globe-outline': globeOutline,
       'storefront-outline': storefrontOutline,
       'trending-up-outline': trendingUpOutline,
+      'trending-down-outline': trendingDownOutline,
       'speedometer-outline': speedometerOutline,
+      'wallet-outline': walletOutline,
+      'calendar-outline': calendarOutline,
     });
     // Las cifras y las cuentas del personal son del Gerente; el backend rechaza a los demás roles.
     if (this.auth.rol() !== 'GERENTE') {
@@ -532,7 +654,9 @@ export class AdminPage {
   async setPeriod(period: SalesPeriod) {
     if (period === this.period()) return;
     this.period.set(period);
-    this.shown.set(PAGE_SIZE);
+    this.shownDays.set(7);
+    this.shownWeb.set(PAGE_SIZE);
+    this.shownPos.set(PAGE_SIZE);
     this.salesLoading.set(true);
     this.error.set('');
     try {
@@ -544,13 +668,25 @@ export class AdminPage {
     }
   }
 
-  showMore() {
-    this.shown.update((n) => n + PAGE_SIZE);
+  spentOf = spent;
+  profitOf = (d: BalanceDia) => income(d) - spent(d);
+
+  expenseDetail(d: BalanceDia): string {
+    return `Prendas ${formatCLP(d.costoPrendas)} · Despacho ${formatCLP(d.despacho)} · Comisiones ${formatCLP(d.comisiones)} · Mermas ${formatCLP(d.mermas)}`;
   }
 
-  /** Alto de la barra de un día; un día con ventas siempre se alcanza a ver. */
-  barHeight(day: DayBar): number {
-    return day.total === 0 ? 0 : Math.max(4, (day.total / this.chartMax()) * 100);
+  dayLabel(fecha: string): string {
+    const [y, m, d] = fecha.split('-').map(Number);
+    return new Date(Date.UTC(y!, m! - 1, d!, 12)).toLocaleDateString('es-CL', { timeZone: 'UTC', weekday: 'short', day: '2-digit', month: '2-digit' });
+  }
+
+  average(totals: { total: number; count: number }): number {
+    return totals.count ? Math.round(totals.total / totals.count) : 0;
+  }
+
+  /** Alto de una barra del gráfico; un valor distinto de cero siempre se alcanza a ver. */
+  barHeight(value: number): number {
+    return value === 0 ? 0 : Math.max(3, (value / this.chartMax()) * 100);
   }
 
   /** Muestra algunas fechas bajo el gráfico, sin que se encimen. */
@@ -570,10 +706,6 @@ export class AdminPage {
 
   when(fecha: string): string {
     return new Date(fecha).toLocaleString('es-CL', { timeZone: 'America/Santiago', dateStyle: 'short', timeStyle: 'short' });
-  }
-
-  countLabel(count: number): string {
-    return count === 1 ? '1 venta' : `${count} ventas`;
   }
 
   initials(name: string): string {

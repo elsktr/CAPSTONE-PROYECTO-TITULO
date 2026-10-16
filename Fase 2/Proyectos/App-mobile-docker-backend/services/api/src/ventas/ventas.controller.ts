@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
-import type { CheckoutResponse, CompraPendiente, ComprobantePos, ResultadoPago, Usuario, VentaResumen } from '@rockstar/contracts';
+import type { BalanceDia, CheckoutResponse, CompraPendiente, ComprobantePos, ResultadoPago, Usuario, VentaResumen } from '@rockstar/contracts';
 
 import { Publica, Roles, UsuarioActual } from '../auth/decoradores.js';
 import { ComprasService } from './compras.service.js';
@@ -23,6 +23,13 @@ export class VentasController {
   @Roles('GERENTE')
   ventas(@Query('desde') desde?: string): Promise<VentaResumen[]> {
     return this.resumen.pagadas(desde);
+  }
+
+  /** Ingresos y gastos de cada día (costos de las ventas y mermas). Con `desde` (AAAA-MM-DD), desde ese día. Exige sesión de Gerente. */
+  @Get('finanzas/balance')
+  @Roles('GERENTE')
+  balance(@Query('desde') desde?: string): Promise<BalanceDia[]> {
+    return this.resumen.balance(desde);
   }
 
   /** Registra una venta en la tienda, descuenta el stock y devuelve el comprobante. Exige sesión de Vendedor. */

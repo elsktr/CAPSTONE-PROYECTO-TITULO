@@ -1,6 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import type {
+  BalanceDia,
   CuentaInterna,
   IngresoRequest,
   MermaRequest,
@@ -106,6 +107,19 @@ export class AdminService {
   /** Lo que pagaron los clientes por el despacho; es parte del total de las ventas web. */
   readonly shippingCharged = computed(() => this.sales().reduce((sum, s) => sum + s.flete, 0));
 
+  /** Ingresos y gastos de cada día del período, del más reciente al más antiguo. */
+  readonly balance = signal<BalanceDia[]>([]);
+  /** Totales del período: ingresos por canal, gastos por tipo y ganancia. */
+  readonly balanceTotals = computed(() => {
+    const sum = (pick: (d: BalanceDia) => number) => this.balance().reduce((total, d) => total + pick(d), 0);
+    const web = sum((d) => d.ingresoWeb);
+    const pos = sum((d) => d.ingresoPos);
+    const expenses = { garments: sum((d) => d.costoPrendas), shipping: sum((d) => d.despacho), fees: sum((d) => d.comisiones), losses: sum((d) => d.mermas) };
+    const income = web + pos;
+    const spent = expenses.garments + expenses.shipping + expenses.fees + expenses.losses;
+    return { web, pos, income, expenses, spent, profit: income - spent, margin: income ? ((income - spent) / income) * 100 : 0 };
+  });
+
   readonly totalUnits = computed(() => this.inventory().reduce((sum, p) => sum + p.stock, 0));
   readonly lowStockCount = computed(() => this.inventory().filter((p) => p.active && p.stock <= 3).length);
   readonly locationsCount = computed(() => new Set(this.inventory().map((p) => p.location)).size);
@@ -144,11 +158,16 @@ export class AdminService {
     this.inventory.set(variantes.map(toRow));
   }
 
-  /** Ventas de ambos canales desde el inicio del período. */
+  /** Ventas de ambos canales y balance diario, desde el inicio del período. */
   async loadSales(period: SalesPeriod): Promise<void> {
     const desde = periodStart(period);
     const params: Record<string, string> = desde ? { desde } : {};
-    this.sales.set(await firstValueFrom(this.http.get<VentaResumen[]>(`${API_URL}/ventas`, { params })));
+    const [sales, balance] = await Promise.all([
+      firstValueFrom(this.http.get<VentaResumen[]>(`${API_URL}/ventas`, { params })),
+      firstValueFrom(this.http.get<BalanceDia[]>(`${API_URL}/finanzas/balance`, { params })),
+    ]);
+    this.sales.set(sales);
+    this.balance.set(balance);
   }
 
   /** Lo que muestra la vista de finanzas, que es del Gerente. */
