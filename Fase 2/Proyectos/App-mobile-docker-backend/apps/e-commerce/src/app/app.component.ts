@@ -33,6 +33,7 @@ import {
 } from 'ionicons/icons';
 
 import { CartDrawerComponent } from './components/cart-drawer.component';
+import { CookieBannerComponent } from './components/cookie-banner.component';
 import { ShopNavComponent } from './components/shop-nav.component';
 import { AuthService } from './services/auth.service';
 import { CartService } from './services/cart.service';
@@ -44,6 +45,7 @@ import { ToastService } from './services/toast.service';
   imports: [
     CommonModule,
     CartDrawerComponent,
+    CookieBannerComponent,
     ShopNavComponent,
     RouterOutlet,
     RouterLink,
@@ -139,6 +141,8 @@ import { ToastService } from './services/toast.service';
       </ion-tab-bar>
 
       <app-cart-drawer *ngIf="!isAdminOnly()"></app-cart-drawer>
+
+      <app-cookie-banner></app-cookie-banner>
 
       <!-- Toast global -->
       <div *ngIf="toast.message()" class="app-toast">
