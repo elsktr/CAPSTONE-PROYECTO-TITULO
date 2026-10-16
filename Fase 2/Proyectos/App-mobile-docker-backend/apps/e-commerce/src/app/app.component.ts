@@ -33,6 +33,7 @@ import {
 } from 'ionicons/icons';
 
 import { CartDrawerComponent } from './components/cart-drawer.component';
+import { LoginInviteComponent } from './components/login-invite.component';
 import { ShopNavComponent } from './components/shop-nav.component';
 import { AuthService } from './services/auth.service';
 import { CartService } from './services/cart.service';
@@ -44,6 +45,7 @@ import { ToastService } from './services/toast.service';
   imports: [
     CommonModule,
     CartDrawerComponent,
+    LoginInviteComponent,
     ShopNavComponent,
     RouterOutlet,
     RouterLink,
@@ -139,6 +141,9 @@ import { ToastService } from './services/toast.service';
       </ion-tab-bar>
 
       <app-cart-drawer *ngIf="!isAdminOnly()"></app-cart-drawer>
+
+      <!-- Invitación a iniciar sesión para los invitados, sin taparles la tienda -->
+      <app-login-invite></app-login-invite>
 
       <!-- Toast global -->
       <div *ngIf="toast.message()" class="app-toast">
@@ -254,7 +259,7 @@ export class AppComponent {
     this.auth.logout();
     // El carrito y los datos de despacho son de quien cerró la sesión: no quedan en el dispositivo.
     this.cart.reset();
-    this.router.navigateByUrl('/entry');
+    this.router.navigateByUrl('/shop');
     this.toast.show('Sesión cerrada.');
   }
 }
