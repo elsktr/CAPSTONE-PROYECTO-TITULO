@@ -206,7 +206,7 @@ export class AppComponent {
   showTabs = computed(() => this.auth.entryDismissed() && this.path() !== '/entry');
   onProfile = computed(() => this.path() === '/perfil');
   /** La barra de categorías va en las pantallas de la tienda, no en las del personal. */
-  showNav = computed(() => this.showHeader() && this.path() !== '/warehouse' && this.path() !== '/admin');
+  showNav = computed(() => this.showHeader() && !['/warehouse', '/admin', '/inversion'].includes(this.path()));
   /** El personal no compra en la tienda: no ve el carrito. */
   isAdminOnly = computed(() => this.auth.isAdmin());
 

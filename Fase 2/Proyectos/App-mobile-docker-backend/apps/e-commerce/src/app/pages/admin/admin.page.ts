@@ -1,13 +1,13 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import {
   IonContent,
   IonIcon,
   IonButton,
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
-import { statsChartOutline, logOutOutline, cardOutline, warningOutline, barChartOutline, peopleOutline } from 'ionicons/icons';
+import { statsChartOutline, logOutOutline, cardOutline, warningOutline, barChartOutline, peopleOutline, trendingUpOutline } from 'ionicons/icons';
 import { errorMessage } from '../../core/api';
 import { formatCLP, roleLabel } from '../../data/models';
 import { AdminService } from '../../services/admin.service';
@@ -17,7 +17,7 @@ import { CartService } from '../../services/cart.service';
 @Component({
   selector: 'app-admin',
   standalone: true,
-  imports: [CommonModule, IonContent, IonIcon, IonButton],
+  imports: [CommonModule, RouterLink, IonContent, IonIcon, IonButton],
   template: `
     <ion-content class="rockstar-content" [fullscreen]="true">
       <div class="page-padded">
@@ -65,6 +65,18 @@ import { CartService } from '../../services/cart.service';
             <div class="stat-note">Impacto neto de pérdidas</div>
           </div>
         </div>
+
+        <a class="card-rockstar modelo-card" routerLink="/inversion">
+          <ion-icon name="trending-up-outline" color="danger" aria-hidden="true"></ion-icon>
+          <div>
+            <h3>Recomendaciones de inversión</h3>
+            <p class="text-faint">
+              Modelo predictivo con las ventas del e-commerce y de la tienda física: qué comprar y cuánto, qué no reponer
+              y qué bandas y categorías están creciendo.
+            </p>
+          </div>
+          <span class="modelo-ir">Ver recomendaciones →</span>
+        </a>
 
         <div class="grid-2">
           <div class="card-rockstar" style="padding: 20px;">
@@ -129,6 +141,16 @@ import { CartService } from '../../services/cart.service';
     .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); }
     .stat-value { font-size: 24px; font-weight: 900; margin: 16px 0 4px; }
     .stat-note { font-size: 11px; color: var(--text-faint); }
+    .modelo-card {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 20px; margin-bottom: 20px;
+      color: var(--text); text-decoration: none; border-color: #7f1d1d;
+    }
+    .modelo-card:hover, .modelo-card:focus-visible { border-color: var(--accent); }
+    .modelo-card > ion-icon { font-size: 28px; flex: none; }
+    .modelo-card > div { flex: 1 1 280px; }
+    .modelo-card h3 { margin: 0 0 4px; font-size: 16px; }
+    .modelo-card p { margin: 0; font-size: 13px; }
+    .modelo-ir { font-size: 13px; font-weight: 700; color: var(--accent-hover); white-space: nowrap; }
     .grid-2 { display: grid; grid-template-columns: 1fr; gap: 20px; }
     @media (min-width: 1024px) { .grid-2 { grid-template-columns: 2fr 1fr; } }
     .op-head, .users-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
@@ -164,6 +186,7 @@ export class AdminPage {
       'warning-outline': warningOutline,
       'bar-chart-outline': barChartOutline,
       'people-outline': peopleOutline,
+      'trending-up-outline': trendingUpOutline,
     });
     // Las cifras y las cuentas del personal son del Gerente; el backend rechaza a los demás roles.
     if (this.auth.rol() !== 'GERENTE') {

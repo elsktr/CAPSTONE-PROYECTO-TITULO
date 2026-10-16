@@ -40,6 +40,10 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/admin/admin.page').then((m) => m.AdminPage),
   },
   {
+    path: 'inversion',
+    loadComponent: () => import('./pages/inversion/inversion.page').then((m) => m.InversionPage),
+  },
+  {
     path: 'support',
     loadComponent: () => import('./pages/support/support.page').then((m) => m.SupportPage),
   },

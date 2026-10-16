@@ -177,3 +177,34 @@ body {
 .user-chip.is-admin .dot {
   background: var(--accent);
 }
+
+/* Insignia de estado: siempre con ícono y texto; el color nunca va solo. */
+:root {
+  --estado-bueno: #0ca30c;
+  --estado-aviso: #fab219;
+  --estado-serio: #ec835a;
+  --estado-critico: #d03b3b;
+}
+
+.insignia {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.insignia ion-icon { font-size: 14px; color: var(--text-faint); }
+.insignia.bueno { border-color: var(--estado-bueno); }
+.insignia.bueno ion-icon { color: var(--estado-bueno); }
+.insignia.aviso { border-color: var(--estado-aviso); }
+.insignia.aviso ion-icon { color: var(--estado-aviso); }
+.insignia.serio { border-color: var(--estado-serio); }
+.insignia.serio ion-icon { color: var(--estado-serio); }
+.insignia.critico { border-color: var(--estado-critico); }
+.insignia.critico ion-icon { color: var(--estado-critico); }
