@@ -163,6 +163,68 @@ describe('venta POS', () => {
     expect((await vender<ErrorApi>({ lineas, idCliente: 1 })).status).toBe(400);
   });
 
+  it('guarda la autorización de la máquina de cobro con la venta', async () => {
+    const pagoMaquina = { idCobro: randomUUID(), codigoAutorizacion: '123456', ultimosDigitos: '4242' };
+
+    const { status, cuerpo } = await vender({
+      lineas: [{ idVariante: EDDIE, cantidad: 1, permitirBodega: true }],
+      medioPago: 'DEBITO_PRESENCIAL',
+      pagoMaquina,
+    });
+
+    expect(status).toBe(201);
+    expect(cuerpo.pagoMaquina).toEqual({ codigoAutorizacion: '123456', ultimosDigitos: '4242' });
+    const [transaccion] = await filas<{ codigo_autorizacion: string; ultimos_digitos: string; id_cobro_maquina: string; estado: string }>(
+      'SELECT codigo_autorizacion, ultimos_digitos, id_cobro_maquina, estado FROM pagos.transacciones WHERE id_venta = $1',
+      [cuerpo.idVenta],
+    );
+    expect(transaccion).toEqual({ codigo_autorizacion: '123456', ultimos_digitos: '4242', id_cobro_maquina: pagoMaquina.idCobro, estado: 'AUTORIZADA' });
+  });
+
+  it('sin máquina de cobro la venta no lleva autorización', async () => {
+    const { cuerpo } = await vender({ lineas: [{ idVariante: EDDIE, cantidad: 1, permitirBodega: true }], medioPago: 'CREDITO_PRESENCIAL' });
+    expect(cuerpo.pagoMaquina).toBeNull();
+  });
+
+  it('un cobro de la máquina paga una sola venta, aunque se reintente la misma', async () => {
+    const pagoMaquina = { idCobro: randomUUID(), codigoAutorizacion: 'A1B2C3' };
+    const datos = {
+      claveIdempotencia: randomUUID(),
+      lineas: [{ idVariante: EDDIE, cantidad: 1, permitirBodega: true }],
+      medioPago: 'CREDITO_PRESENCIAL' as const,
+      pagoMaquina,
+    };
+
+    const primera = await vender(datos);
+    const reintento = await vender(datos);
+    expect(reintento.cuerpo.idVenta).toBe(primera.cuerpo.idVenta);
+    expect(primera.cuerpo.pagoMaquina).toEqual({ codigoAutorizacion: 'A1B2C3', ultimosDigitos: null });
+
+    const otra = await vender<ErrorApi>({ ...datos, claveIdempotencia: randomUUID() });
+    expect(otra.status).toBe(409);
+    expect(otra.cuerpo.codigo).toBe('COBRO_YA_USADO');
+    expect(otra.cuerpo.detalle).toEqual({ idVenta: primera.cuerpo.idVenta });
+  });
+
+  it('valida el pago de la máquina y no lo acepta en efectivo', async () => {
+    const lineas = [{ idVariante: EDDIE, cantidad: 1, permitirBodega: true }];
+    const valido = { idCobro: randomUUID(), codigoAutorizacion: '123456' };
+    const antes = await existencias(EDDIE);
+
+    expect((await vender<ErrorApi>({ lineas, medioPago: 'EFECTIVO', pagoMaquina: valido })).status).toBe(400);
+    for (const pagoMaquina of [
+      { ...valido, codigoAutorizacion: '' },
+      { ...valido, codigoAutorizacion: '12 34' },
+      { ...valido, idCobro: '' },
+      { ...valido, ultimosDigitos: '42' },
+      { ...valido, ultimosDigitos: '4111111111111111' },
+    ]) {
+      const { status } = await vender<ErrorApi>({ lineas, medioPago: 'DEBITO_PRESENCIAL', pagoMaquina });
+      expect(status, JSON.stringify(pagoMaquina)).toBe(400);
+    }
+    expect(await existencias(EDDIE)).toEqual(antes);
+  });
+
   it('solo la registra un Vendedor', async () => {
     const lineas = [{ idVariante: EDDIE, cantidad: 1 }];
     expect((await vender<ErrorApi>({ lineas }, cliente)).status).toBe(403);
