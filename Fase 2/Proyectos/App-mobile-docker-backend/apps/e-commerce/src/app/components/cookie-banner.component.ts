@@ -14,6 +14,9 @@ function storedChoice(): CookieChoice | null {
   }
 }
 
+/** El aviso está a la vista: aún no se decide. Otros avisos esperan a que se cierre para no encimarse. */
+export const cookieBannerVisible = signal(storedChoice() === null);
+
 /**
  * Aviso de cookies de la primera visita. La tienda guarda la sesión y el carrito en el
  * navegador; la decisión queda registrada y el aviso no vuelve a aparecer.
@@ -85,7 +88,7 @@ function storedChoice(): CookieChoice | null {
   `],
 })
 export class CookieBannerComponent {
-  readonly visible = signal(storedChoice() === null);
+  readonly visible = cookieBannerVisible;
 
   decide(decision: CookieChoice) {
     try {

@@ -240,7 +240,7 @@ export class PerfilPage {
   logout() {
     this.auth.logout();
     this.cart.reset();
-    this.router.navigateByUrl('/entry');
+    this.router.navigateByUrl('/shop');
     this.toast.show('Sesión cerrada.');
   }
 

@@ -15,6 +15,7 @@ Tienda online de ropa Rock & Metal, conectada al backend de Rockstar (`services/
 - Perfil: el botón con el nombre, en el encabezado, abre los datos de la cuenta y sus compras. Las pendientes son las que aún esperan pago y se pueden retomar; las hechas son las pagadas, con el estado de su pedido.
 - Acceso del personal con sus cuentas del backend. Bodega ingresa stock y registra mermas; el Gerente define precio y descripción y ve las cifras.
 - Chat de soporte Roxy, con respuestas locales.
+- Probador 3D: el botón **Probar** de cada prenda abre un maniquí 3D con la altura y el peso del cliente, vestido con la talla elegida. Indica si queda apretada, bien u holgada y corta o larga, recomienda una talla y la agrega al carrito. Las medidas se recuerdan en el navegador y no se envían al backend.
 
 El pago es **simulado**: no se pide tarjeta ni se cobra. La pantalla de pago deja elegir si se aprueba o se rechaza.
 
@@ -26,6 +27,7 @@ Las dependencias son propias de esta carpeta (usa otra versión de Angular que l
 npm install
 npm start          # http://localhost:4300
 npm run build      # genera www/browser
+npm test           # pruebas unitarias (Vitest) del cálculo de tallas
 ```
 
 `npm start` reenvía `/api` al backend en `http://localhost:3000` (ver `proxy.conf.json`). El backend se levanta con `docker compose up` en la raíz, o con `npm run local` en `services/api`.
@@ -58,10 +60,14 @@ src/app/
 │   ├── shop-nav.component.ts     Barra de categorías con menús desplegables
 │   ├── cart-drawer.component.ts  Panel lateral del carrito
 │   ├── order-card.component.ts   Tarjeta de una compra pagada, en Mis pedidos y en el perfil
-│   └── cart-panel.component.ts   Contenido del carrito: productos, despacho y totales
+│   ├── cart-panel.component.ts   Contenido del carrito: productos, despacho y totales
+│   └── probador.component.ts     Probador 3D: medidas, tallas, ajuste y botón al carrito
 ├── data/
 │   ├── models.ts            Modelos de la interfaz y formato de precios y fechas
+│   ├── probador.ts          Medidas del cuerpo, tabla de tallas, ajuste y recomendación
 │   └── search.ts            Limpieza del texto de búsqueda y coincidencia con los productos
+├── probador/
+│   └── escena-maniqui.ts    Maniquí y prendas en three.js; se carga solo al abrir el probador
 ├── services/
 │   ├── auth.service.ts      Sesión: inicio, registro, cierre y renovación
 │   ├── products.service.ts  Catálogo publicado
@@ -94,3 +100,5 @@ El proyecto conserva la configuración de Capacitor, pero la app empaquetada no 
 - **Ionic 8**
 - **Capacitor 6**
 - **TypeScript 5.5**
+- **three.js** para el probador 3D
+- **Vitest** para las pruebas unitarias

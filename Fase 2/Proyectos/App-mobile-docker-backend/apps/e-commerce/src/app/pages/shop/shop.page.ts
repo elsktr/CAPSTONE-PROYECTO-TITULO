@@ -2,15 +2,17 @@ import { Component, computed, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { IonContent, IonButton, IonIcon, IonGrid, IonRow, IonCol } from '@ionic/angular/standalone';
+import { IonContent, IonButton, IonIcon, IonGrid, IonRow, IonCol, ModalController } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
-import { addOutline } from 'ionicons/icons';
+import { addOutline, bodyOutline } from 'ionicons/icons';
 import { ProductsService } from '../../services/products.service';
 import { CartService } from '../../services/cart.service';
 import { ToastService } from '../../services/toast.service';
 import { AuthService } from '../../services/auth.service';
 import { Product, formatCLP, usePlaceholder } from '../../data/models';
 import { cleanQuery, matchesQuery } from '../../data/search';
+import { tipoDePrenda } from '../../data/probador';
+import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.component';
 
 @Component({
   selector: 'app-shop',
@@ -55,6 +57,15 @@ import { cleanQuery, matchesQuery } from '../../data/search';
                   {{ p.category }}
                 </div>
                 <div class="badge badge-low-stock" *ngIf="p.stock <= 3">Últimas unidades</div>
+                <button
+                  *ngIf="!isAdmin() && sePuedeProbar(p)"
+                  type="button"
+                  class="probar"
+                  [attr.aria-label]="'Probar ' + p.name + ' en el maniquí 3D'"
+                  (click)="probar(p)"
+                >
+                  <ion-icon name="body-outline"></ion-icon><span>Probar</span>
+                </button>
               </div>
               <div class="product-body">
                 <h3>{{ p.name }}</h3>
@@ -87,8 +98,7 @@ import { cleanQuery, matchesQuery } from '../../data/search';
       </div>
       <div class="empty" *ngIf="!products.error() && filtered().length === 0">
         <p>{{ products.loaded() ? 'No se encontraron productos.' : 'Cargando la tienda…' }}</p>
-      </div>
-    </ion-content>
+      </div>    </ion-content>
   `,
   styles: [`
     .hero {
@@ -179,6 +189,16 @@ import { cleanQuery, matchesQuery } from '../../data/search';
       padding: 4px 8px;
       border-radius: 999px;
     }
+    .probar {
+      position: absolute; top: 8px; right: 8px;
+      display: flex; align-items: center; gap: 4px;
+      padding: 5px 10px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(0, 0, 0, 0.65); color: #fff; font-size: 11px; font-weight: 700; cursor: pointer;
+      backdrop-filter: blur(4px);
+    }
+    .probar:hover { background: var(--accent); border-color: var(--accent); }
+    .probar ion-icon { font-size: 14px; }
+    @media (max-width: 600px) { .probar { padding: 6px; } .probar span { display: none; } }
     .badge-low-stock {
       bottom: 10px;
       left: 10px;
@@ -261,8 +281,27 @@ export class ShopPage {
     );
   });
 
+  private readonly modales = inject(ModalController);
+
+  sePuedeProbar(p: Product): boolean {
+    return tipoDePrenda(p.category) !== null;
+  }
+
+  /**
+   * Abre el probador 3D sobre toda la app (un modal dentro de la página quedaría bajo la barra
+   * de pestañas), con las tallas del mismo producto en el mismo color.
+   */
+  async probar(p: Product): Promise<void> {
+    const prueba: PruebaDePrenda = {
+      producto: p,
+      variantes: this.products.products().filter((v) => v.productId === p.productId && v.color === p.color),
+    };
+    const modal = await this.modales.create({ component: ProbadorComponent, componentProps: { prueba }, cssClass: 'modal-probador' });
+    await modal.present();
+  }
+
   constructor() {
-    addIcons({ 'add-outline': addOutline });
+    addIcons({ 'add-outline': addOutline, 'body-outline': bodyOutline });
     // La disponibilidad cambia con cada venta: el catálogo se pide cada vez que se entra a la tienda.
     void this.products.load();
   }

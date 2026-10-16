@@ -1,3 +1,4 @@
+import type { CanalVenta } from './analitica';
 import type { Ubicacion } from './inventario';
 import type { LineaPedidoCliente } from './logistica';
 
@@ -160,4 +161,51 @@ export interface ComprobantePos {
   pagoMaquina: { codigoAutorizacion: string; ultimosDigitos: string | null } | null;
   lineas: LineaComprobantePos[];
   total: number;
+}
+
+// --- Ventas de todos los canales (Finanzas) ---
+
+/**
+ * Venta pagada de cualquier canal. GET /ventas (Gerente)
+ *
+ * Con `?desde=AAAA-MM-DD` solo las de ese día en adelante (hora de Chile). De la más
+ * reciente a la más antigua.
+ */
+export interface VentaResumen {
+  idVenta: number;
+  fecha: string;
+  canal: CanalVenta;
+  /** Lo cobrado, con el flete incluido en las ventas web. */
+  total: number;
+  /** Parte del total que pagó el cliente por el despacho; 0 en el POS. */
+  flete: number;
+  unidades: number;
+  cliente: string | null;
+  /** Quien registró la venta en el POS; `null` en las ventas web. */
+  vendedor: string | null;
+  /** Nombre del medio de pago, si ya se conoce. */
+  medioPago: string | null;
+}
+
+/**
+ * Ingresos y gastos de un día, en hora de Chile. GET /finanzas/balance (Gerente)
+ *
+ * Solo los días con ventas o mermas, del más reciente al más antiguo. Con
+ * `?desde=AAAA-MM-DD`, solo desde ese día. Ganancia = ingresos − gastos.
+ */
+export interface BalanceDia {
+  /** AAAA-MM-DD. */
+  fecha: string;
+  /** Ventas web pagadas ese día, con el flete cobrado. */
+  ingresoWeb: number;
+  /** Ventas del POS ese día. */
+  ingresoPos: number;
+  /** Lo que costaron las prendas vendidas ese día, a su costo de compra. */
+  costoPrendas: number;
+  /** Lo que cobró Starken por despachar las ventas de ese día; 0 mientras no se despachan. */
+  despacho: number;
+  /** Comisiones de los medios de pago de las ventas de ese día. */
+  comisiones: number;
+  /** Prendas dadas de baja ese día, a su costo de compra. */
+  mermas: number;
 }
