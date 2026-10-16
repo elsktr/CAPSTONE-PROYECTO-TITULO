@@ -5,6 +5,7 @@ detrás de nginx, con proxy `/api/` al backend `App-mobile-docker-backend`.
 
 - App: `http://localhost:8082` → redirige a `/login`, POS en `/pos`
 - Salud API (vía proxy): `http://localhost:8082/api/v1/salud`
+- Máquina de cobro simulada: `http://localhost:8090` (contenedor `terminal`, ver abajo)
 
 ## Requisitos
 
@@ -50,31 +51,120 @@ Ver `.env.example` (desarrollo) y `.env.production` (valores del contenedor).
   Solo `VENDEDOR` puede cobrar; `BODEGA` y `GERENTE` entran pero el backend rechaza la
   venta. Con "Recordarme" la sesión dura 30 días (`refreshToken` en `localStorage`);
   sin marcarla, dura la jornada (8 h).
-- **Cliente mostrador** (modal "Identificar cliente" al cobrar): cuenta rol `CLIENTE`,
-  p. ej. `cliente@rockstar.cl`. Sin sesión cliente no se puede cobrar. Queda anotado en
-  la venta y en el comprobante.
+- **Cliente mostrador** (opcional): en el cobro, "Identificar cliente" pide el correo y
+  la contraseña de una cuenta rol `CLIENTE`, p. ej. `cliente@rockstar.cl`. Si se
+  identifica, queda anotado en la venta y en el comprobante; si no, la venta sale sin
+  cliente. Vale para una sola venta: el siguiente comprador parte sin cliente.
 - **Venta**: `POST /ventas/pos` con el token del vendedor. Registra la venta pagada,
   descuenta el stock al momento y devuelve el comprobante. Sin flete ni pedido de
   despacho: el comprador se lleva la prenda.
 - **Stock**: sale de la sala de ventas. Si la sala no alcanza, el backend responde
   `409 EXISTENCIA_EN_BODEGA` y el POS ofrece "Retirar de bodega"; al aceptar reenvía
   con `permitirBodega` y la misma clave de idempotencia.
-- **Medios de pago**: efectivo, débito o crédito. La tarjeta se pasa por el terminal
-  físico de la tienda: el POS solo registra el medio (Webpay es de la tienda web).
+- **Medios de pago**: efectivo, débito o crédito. Con la máquina de cobro activa, la
+  tarjeta se cobra enviándole el monto (ver abajo); sin ella, se pasa por un terminal
+  aparte y el POS solo registra el medio (Webpay es de la tienda web).
 - **Boleta**: comprobante interno sin validez tributaria, con id, fecha, vendedor,
   cliente, líneas, total y medio; impresión con CSS print-only (`window.print()`). Tras
   la venta: stock se refresca, carrito se vacía y el registro de jornada
   (`GET /ventas/pos`, ventas del día del vendedor) suma la venta.
 
+## Escaneo de etiquetas
+
+La grilla del POS ("Productos de la venta") muestra solo lo que se está vendiendo: empieza
+vacía y cada prenda escaneada o elegida aparece ahí, la última primero y destacada, con
+su `+/−`. Al bajar a 0 sale de la grilla; tras cobrar, la grilla queda vacía.
+
+El resto del catálogo está en la barra de búsqueda: al escribir despliega las prendas
+que calzan por nombre, banda, categoría, color o SKU (cada palabra desde su comienzo,
+en cualquier orden; una talla como `m` o `xl` filtra por talla). Se eligen con clic o
+con las flechas y Enter. Con Enter y sin elegir: el SKU exacto, o la única
+coincidencia; con varias pide elegir; sin ninguna lo busca como código de barras.
+
+Cada prenda se suma al carrito y se cobra con el flujo de siempre. Hay tres formas de agregarla:
+
+- **Cámara**: botón "Escanear con cámara". Lee de forma continua el QR (trae el SKU) y el
+  código de barras EAN-13 de la etiqueta. Para sumar otra unidad del mismo producto se
+  retira la etiqueta y se vuelve a mostrar. El navegador solo entrega la cámara en
+  `https` o en `localhost`: desde otro equipo por `http://<ip>:8082` hay que usar las
+  otras dos formas.
+- **Pistola USB**: escribe el código en el campo de la barra y presiona Enter sola. El
+  campo queda con el foco al abrir el POS.
+- **A mano**: escribir el SKU o el código de barras en el mismo campo.
+
+El SKU se busca en el catálogo cargado; el código de barras se resuelve con
+`GET /inventario/variantes/por-codigo/:codigo` (token del vendedor). Una prenda sin
+precio no está a la venta y el POS lo avisa. Las etiquetas se imprimen desde la app de
+bodega, pantalla "Etiquetas de prendas".
+
+## Máquina de cobro
+
+La máquina de cobro (terminal de tarjetas) se conecta por la red de la tienda: el
+navegador de la caja le envía el monto por HTTP a su IP y espera el resultado. Mientras
+no haya una máquina real, el contenedor `terminal` hace de máquina simulada.
+
+**Activarla en la caja**: botón con ícono de tarjeta (barra superior) o el aviso
+"Activar máquina de cobro". Se enciende "Usar la máquina de cobro", se escribe su
+dirección (IP y puerto) y "Probar conexión" debe responder "Conectada". La
+configuración queda en esa caja (`localStorage`, clave `pos_maquina_cobro`).
+
+- Si el POS se abre en el mismo equipo de Docker, la dirección es `localhost:8090`.
+- Desde otra caja de la red, la IP del equipo de Docker, p. ej. `192.168.1.20:8090`
+  (se ve con `ipconfig`, "Dirección IPv4"). Windows puede pedir permitir el puerto 8090
+  en el firewall.
+
+**Cobro**: con débito o crédito, "Cobrar $X en la máquina" envía el monto y el POS
+muestra "Esperando el pago en la máquina". Al aprobarse, registra la venta y la boleta
+lleva el código de autorización y los últimos dígitos de la tarjeta. Si se rechaza,
+el vendedor reintenta o cambia el medio de pago; "Cancelar cobro" desiste en la
+máquina. Si la máquina no responde, "Ya cobré aparte: registrar la venta" registra la
+venta sin ella. El efectivo nunca pasa por la máquina.
+
+Un cobro aprobado cuya venta no se registra (por ejemplo, al cancelar el retiro desde
+bodega) se **anula** en la máquina: el cliente no queda cobrado sin venta.
+
+**Máquina simulada**: su pantalla está en `http://<IP del equipo>:8090`; ábrela en un
+celular de la misma red (o en otra pestaña) y usa "Pasar tarjeta (aprobar)" o
+"Rechazar" con un motivo. Para demostraciones sin tocar la pantalla,
+`TERMINAL_APROBAR_AUTOMATICO_MS=3000 docker compose up -d` aprueba cada cobro solo a
+los 3 segundos. Un cobro sin pagar se cancela solo a los 2 minutos.
+
+**Máquina real**: el POS habla con la máquina a través de la interfaz `MaquinaDeCobro`
+(`src/lib/terminal.ts`). Para una máquina real (Transbank POS Integrado, Mercado Pago
+Point, Getnet, SumUp…) se escribe otro cliente que cumpla esa interfaz; el flujo de
+venta no cambia. El protocolo de la simulada está documentado en
+`terminal-simulada/servidor.mjs`.
+
+**Códigos de autorización**: cada venta cobrada en la máquina envía su pago
+(`pagoMaquina` en `POST /ventas/pos`) y el backend lo guarda en `pagos.transacciones`,
+en la misma transacción que la venta: `codigo_autorizacion`, `ultimos_digitos` (nunca el
+número completo) e `id_cobro_maquina`. Un cobro paga una sola venta: si llega con otra,
+el backend responde `409 COBRO_YA_USADO` y el POS no ofrece anularlo. La boleta y el
+registro de jornada muestran la autorización guardada. Para buscar una venta por el
+código del voucher:
+
+```sql
+SELECT t.id_venta, t.monto, t.ultimos_digitos, t.creado_en
+FROM pagos.transacciones t
+WHERE t.codigo_autorizacion = '970317';
+```
+
+Los cobros que se anulan en la máquina (porque la venta no se registró) no generan
+venta y no quedan en la base; los muestra el reporte de la propia máquina.
+
 ## Pruebas
 
 ```bash
-npm run test.unit -- --run   # Vitest (API client + smoke App)
+npm run test.unit -- --run   # Vitest (cliente API, búsqueda, máquina de cobro, smoke App)
+npm run test.terminal        # máquina de cobro simulada (node --test)
 npm run test.e2e             # Cypress contra http://localhost:8082 (requiere contenedores)
 ```
 
-La suite e2e (26 tests) usa intercepts con `cypress/fixtures/catalogo-integracion.json`
-(7 variantes) salvo salud/login reales. Notas:
+La suite e2e (45 tests) usa intercepts con `cypress/fixtures/catalogo-integracion.json`
+(7 variantes) salvo salud/login reales. `maquina-cobro.cy.ts` responde la máquina con
+intercepts; `maquina-cobro-real.cy.ts` cobra contra el contenedor `terminal` de verdad.
+Desde la terminal integrada de VS Code, Cypress necesita
+`env -u ELECTRON_RUN_AS_NODE npx cypress run`. Notas:
 
 - Cypress desactiva animaciones CSS vía `cypress/support/e2e.ts` (determinismo visual).
 - Viewport e2e: 1280×1080 (pantalla de caja típica).

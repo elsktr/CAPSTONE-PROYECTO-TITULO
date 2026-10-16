@@ -206,6 +206,34 @@ describe('api client', () => {
     });
   });
 
+  describe('buscarPorCodigo', () => {
+    it('consulta el codigo leido con el token del vendedor', async () => {
+      const variante = { idVariante: 1, sku: 'RS-0001', codigo: '7800000000001', producto: 'Polera Calavera', talla: 'M', color: 'Negro', disponible: 4 };
+      mockFetch.mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify(variante) });
+      const result = await api.buscarPorCodigo('vendor-token', '7800000000001');
+      expect(result).toEqual(variante);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/inventario/variantes/por-codigo/7800000000001'),
+        expect.objectContaining({ headers: { Authorization: 'Bearer vendor-token' } })
+      );
+    });
+
+    it('codifica el codigo en la URL', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, text: async () => '{}' });
+      await api.buscarPorCodigo('t', 'RS 0001/x');
+      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/por-codigo/RS%200001%2Fx'), expect.anything());
+    });
+
+    it('rechaza con status 404 si el codigo no existe', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        text: async () => JSON.stringify({ codigo: 'NO_ENCONTRADO', mensaje: 'El código no está registrado.' }),
+      });
+      await expect(api.buscarPorCodigo('t', '000')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
   describe('getImageUrl', () => {
     it('resuelve fotos del backend al mismo origen del POS', () => {
       expect(api.getImageUrl({ imagenUrl: 'assets/prendas/polera-eddie.webp' })).toBe(

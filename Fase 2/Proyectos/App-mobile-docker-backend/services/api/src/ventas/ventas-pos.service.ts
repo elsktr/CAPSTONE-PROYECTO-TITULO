@@ -5,6 +5,7 @@ import type {
   LineaSinDisponibilidad,
   LineaVentaPos,
   MedioPresencial,
+  PagoMaquina,
   Ubicacion,
   Usuario,
   VentaPosRequest,
@@ -35,6 +36,7 @@ interface DatosDeVariante {
 const COMPROBANTES = `
   SELECT ve.id_venta, ve.fecha, ve.total, vd.nombre AS vendedor, cl.nombre AS cliente,
          mp.codigo AS medio_codigo, mp.nombre AS medio_nombre,
+         t.codigo_autorizacion, t.ultimos_digitos,
          COALESCE((
            SELECT json_agg(json_build_object(
                     'idVariante', v.id_variante, 'sku', v.sku, 'producto', p.nombre, 'talla', ta.nombre,
@@ -62,6 +64,8 @@ interface FilaComprobante {
   cliente: string | null;
   medio_codigo: MedioPresencial;
   medio_nombre: string;
+  codigo_autorizacion: string | null;
+  ultimos_digitos: string | null;
   lineas: ComprobantePos['lineas'];
 }
 
@@ -71,6 +75,7 @@ const comprobanteDe = (fila: FilaComprobante): ComprobantePos => ({
   vendedor: fila.vendedor,
   cliente: fila.cliente,
   medioPago: { codigo: fila.medio_codigo, nombre: fila.medio_nombre },
+  pagoMaquina: fila.codigo_autorizacion === null ? null : { codigoAutorizacion: fila.codigo_autorizacion, ultimosDigitos: fila.ultimos_digitos },
   lineas: fila.lineas,
   total: fila.total,
 });
@@ -79,7 +84,8 @@ const comprobanteDe = (fila: FilaComprobante): ComprobantePos => ({
  * Venta en la tienda física. A diferencia de la compra web no hay reserva, pasarela ni
  * despacho: el comprador paga en el mostrador y se lleva la prenda, así que en una sola
  * transacción se registra la venta pagada, se descuenta el stock y se emite el comprobante.
- * La tarjeta se cobra en el terminal de la tienda; aquí solo se anota el medio.
+ * La tarjeta se cobra en la máquina de cobro de la caja, cuya autorización se guarda con
+ * la venta, o en un terminal aparte, y entonces solo se anota el medio.
  */
 @Injectable()
 export class VentasPosService {
@@ -96,6 +102,7 @@ export class VentasPosService {
     const medioPago = datos.medioPago as MedioPresencial;
     exigir(datos.idCliente === undefined || datos.idCliente === null || Number.isInteger(datos.idCliente), 'El cliente no es válido.');
     const idCliente = datos.idCliente ?? null;
+    const pagoMaquina = this.pagoMaquinaValido(datos.pagoMaquina, medioPago);
     // La clave se guarda junto al vendedor: la de uno nunca coincide con la de otro.
     const clave = `pos:${vendedor.id}:${datos.claveIdempotencia}`;
 
@@ -111,6 +118,15 @@ export class VentasPosService {
           [idCliente],
         );
         exigir(cliente !== undefined, 'El cliente no es válido.');
+      }
+      if (pagoMaquina) {
+        const [usado] = await tx.consultar<{ id_venta: number }>(
+          'SELECT id_venta FROM pagos.transacciones WHERE id_cobro_maquina = $1',
+          [pagoMaquina.idCobro],
+        );
+        if (usado) {
+          throw new ErrorDeNegocio(409, 'COBRO_YA_USADO', `Ese cobro de la máquina ya pagó la venta #${usado.id_venta}.`, { idVenta: usado.id_venta });
+        }
       }
 
       const { variantes, origenes } = await this.vendibles(tx, lineas);
@@ -154,9 +170,18 @@ export class VentasPosService {
       );
       await tx.consultar('INSERT INTO ventas.costos_venta (id_venta, comision_pago) VALUES ($1, $2)', [idVenta, medio!.comision]);
       await tx.consultar(
-        `INSERT INTO pagos.transacciones (id_venta, id_medio, monto, estado, comision, resuelto_en)
-         VALUES ($1, $2, $3, 'AUTORIZADA', $4, now())`,
-        [idVenta, medio!.id_medio, total, medio!.comision],
+        `INSERT INTO pagos.transacciones
+           (id_venta, id_medio, monto, estado, comision, resuelto_en, codigo_autorizacion, ultimos_digitos, id_cobro_maquina)
+         VALUES ($1, $2, $3, 'AUTORIZADA', $4, now(), $5, $6, $7)`,
+        [
+          idVenta,
+          medio!.id_medio,
+          total,
+          medio!.comision,
+          pagoMaquina?.codigoAutorizacion ?? null,
+          pagoMaquina?.ultimosDigitos ?? null,
+          pagoMaquina?.idCobro ?? null,
+        ],
       );
       return this.comprobante(tx, idVenta);
     });
@@ -173,6 +198,23 @@ export class VentasPosService {
       [soloSuyas ? usuario.id : null],
     );
     return filas.map(comprobanteDe);
+  }
+
+  /** El pago informado por la máquina de cobro, si lo hay. Solo la tarjeta pasa por ella. */
+  private pagoMaquinaValido(pago: unknown, medioPago: MedioPresencial): Required<PagoMaquina> | null {
+    if (pago === undefined || pago === null) return null;
+    exigir(medioPago !== 'EFECTIVO', 'El efectivo no pasa por la máquina de cobro.');
+    const { idCobro, codigoAutorizacion, ultimosDigitos } = (typeof pago === 'object' ? pago : {}) as Partial<PagoMaquina>;
+    exigir(typeof idCobro === 'string' && /^[\w-]{1,100}$/.test(idCobro), 'El cobro de la máquina no es válido.');
+    exigir(
+      typeof codigoAutorizacion === 'string' && /^[A-Za-z0-9]{1,32}$/.test(codigoAutorizacion),
+      'El código de autorización no es válido.',
+    );
+    exigir(
+      ultimosDigitos === undefined || ultimosDigitos === null || (typeof ultimosDigitos === 'string' && /^\d{4}$/.test(ultimosDigitos)),
+      'Los últimos dígitos de la tarjeta no son válidos.',
+    );
+    return { idCobro, codigoAutorizacion, ultimosDigitos: ultimosDigitos ?? null };
   }
 
   /** Junta las líneas repetidas de una misma variante y valida sus cantidades. */

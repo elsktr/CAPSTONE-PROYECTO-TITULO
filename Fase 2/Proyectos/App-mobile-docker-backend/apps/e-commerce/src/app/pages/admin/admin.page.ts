@@ -1,6 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import {
   IonContent,
   IonIcon,
@@ -68,7 +68,7 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
 @Component({
   selector: 'app-admin',
   standalone: true,
-  imports: [CommonModule, IonContent, IonIcon, IonButton],
+  imports: [CommonModule, RouterLink, IonContent, IonIcon, IonButton],
   template: `
     <ion-content class="rockstar-content" [fullscreen]="true">
       <div class="page-padded dash">
@@ -262,6 +262,18 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
             <div class="stat-note">Impacto neto de pérdidas</div>
           </div>
         </div>
+
+        <a class="modelo-card" routerLink="/inversion">
+          <span class="badge violet"><ion-icon name="trending-up-outline" aria-hidden="true"></ion-icon></span>
+          <div>
+            <h3>Recomendaciones de inversión</h3>
+            <p>
+              Modelo predictivo con las ventas del e-commerce y de la tienda física: qué comprar y cuánto, qué no reponer
+              y qué bandas y categorías están creciendo.
+            </p>
+          </div>
+          <span class="modelo-ir">Ver recomendaciones →</span>
+        </a>
 
         <div class="grid-2">
           <section class="panel" aria-labelledby="resumen-titulo">
@@ -489,6 +501,23 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
     .stat-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
     .stat-value { font-size: 26px; font-weight: 900; margin: 14px 0 4px; color: var(--c); }
     .stat-note { font-size: 11px; color: var(--text-faint); }
+
+    .modelo-card {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 20px; margin-bottom: 20px;
+      border-radius: 18px; color: var(--text); text-decoration: none;
+      background:
+        radial-gradient(120% 160% at 0% 0%, rgba(167, 139, 250, 0.22), transparent 60%),
+        var(--panel);
+      border: 1px solid color-mix(in srgb, var(--c-violet) 35%, transparent);
+      transition: border-color 0.15s, transform 0.15s;
+    }
+    .modelo-card:hover, .modelo-card:focus-visible { border-color: var(--c-violet); transform: translateY(-1px); }
+    .modelo-card:focus-visible { outline: 2px solid var(--c-violet); outline-offset: 2px; }
+    .modelo-card .badge { width: 40px; height: 40px; font-size: 20px; border-radius: 12px; }
+    .modelo-card > div { flex: 1 1 280px; }
+    .modelo-card h3 { margin: 0 0 4px; font-size: 17px; font-weight: 800; }
+    .modelo-card p { margin: 0; font-size: 13px; color: var(--text-faint); }
+    .modelo-ir { font-size: 13px; font-weight: 800; color: var(--c-violet); white-space: nowrap; }
 
     .grid-2 { display: grid; grid-template-columns: 1fr; gap: 0 20px; }
     @media (min-width: 1024px) { .grid-2 { grid-template-columns: 3fr 2fr; } }

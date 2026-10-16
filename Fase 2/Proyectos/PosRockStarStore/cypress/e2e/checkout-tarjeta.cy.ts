@@ -26,12 +26,11 @@ function venderUnaPolera(medio: string) {
   cy.wait('@login');
   cy.wait('@catalogo');
 
-  cy.get('ion-card.product-card').first().within(() => {
-    cy.get('.product-stepper ion-button').last().click();
-  });
+  cy.get('.scan-input').type('POL-NEG-M{enter}');
 
   cy.get('ion-button.cobrar-button').click();
-  cy.get('ion-modal[is-open]').within(() => {
+  cy.contains('ion-button', 'Identificar cliente').click();
+  cy.get('.cliente-form').within(() => {
     cy.get('#cliente-email input').clear().type('cliente@rockstar.cl');
     cy.get('#cliente-password input').clear().type('password123');
     cy.get('ion-button[type="submit"]').click();
@@ -73,7 +72,7 @@ describe('POS - Cobro con tarjeta', () => {
 
     cy.wait('@venta').its('request.body.medioPago').should('equal', 'DEBITO_PRESENCIAL');
     cy.contains('Boleta de Venta').should('be.visible');
-    cy.contains('Tarjeta de débito').should('be.visible');
+    cy.get('.boleta-info').should('contain', 'Tarjeta de débito');
     cy.get('ion-button.boleta-cerrar-btn').click();
     cy.get('.carrito-vacio').should('be.visible');
   });

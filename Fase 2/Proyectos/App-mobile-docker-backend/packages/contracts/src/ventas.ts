@@ -1,3 +1,4 @@
+import type { CanalVenta } from './analitica';
 import type { Ubicacion } from './inventario';
 import type { LineaPedidoCliente } from './logistica';
 
@@ -89,8 +90,22 @@ export interface CompraPendiente extends CheckoutResponse {
 
 // --- Venta en tienda (POS) ---
 
-/** Medios con que se cobra en la tienda. La tarjeta se pasa por el terminal físico: el POS solo registra el medio. */
+/**
+ * Medios con que se cobra en la tienda. La tarjeta se cobra en la máquina de cobro de la
+ * caja, que informa el pago (`PagoMaquina`), o en un terminal aparte, y entonces el POS
+ * solo registra el medio.
+ */
 export type MedioPresencial = 'EFECTIVO' | 'DEBITO_PRESENCIAL' | 'CREDITO_PRESENCIAL';
+
+/** Pago con tarjeta aprobado en la máquina de cobro. Nunca lleva el número de la tarjeta. */
+export interface PagoMaquina {
+  /** Identificador del cobro en la máquina. Un cobro paga una sola venta: si ya pagó otra, `COBRO_YA_USADO`. */
+  idCobro: string;
+  /** Código de autorización del voucher: letras y dígitos, hasta 32. */
+  codigoAutorizacion: string;
+  /** Últimos cuatro dígitos de la tarjeta, si la máquina los informa. */
+  ultimosDigitos?: string | null;
+}
 
 export interface LineaVentaPos {
   idVariante: number;
@@ -116,6 +131,8 @@ export interface VentaPosRequest {
   medioPago: MedioPresencial;
   /** Cliente identificado en el mostrador, si lo hay. */
   idCliente?: number;
+  /** Solo con débito o crédito cobrados en la máquina de cobro: el pago que aprobó. */
+  pagoMaquina?: PagoMaquina;
 }
 
 /** Detalle de un rechazo `EXISTENCIA_EN_BODEGA`: líneas que se pueden vender retirándolas de bodega. */
@@ -140,14 +157,13 @@ export interface ComprobantePos {
   vendedor: string;
   cliente: string | null;
   medioPago: { codigo: MedioPresencial; nombre: string };
+  /** Autorización de la máquina de cobro; `null` en efectivo o tarjeta pasada en un terminal aparte. */
+  pagoMaquina: { codigoAutorizacion: string; ultimosDigitos: string | null } | null;
   lineas: LineaComprobantePos[];
   total: number;
 }
 
 // --- Ventas de todos los canales (Finanzas) ---
-
-/** Por dónde entró la venta: la tienda web o el POS de la tienda física. */
-export type CanalVenta = 'ECOMMERCE' | 'POS';
 
 /**
  * Venta pagada de cualquier canal. GET /ventas (Gerente)

@@ -1,7 +1,7 @@
 import { Routes } from '@angular/router';
 
 export const routes: Routes = [
-  // La página abre en la tienda; iniciar sesión se ofrece en un recuadro pequeño.
+  // La página abre en la tienda como invitado; iniciar sesión se ofrece en un recuadro pequeño y en la pestaña "Ingresar".
   { path: '', redirectTo: 'shop', pathMatch: 'full' },
   {
     path: 'entry',
@@ -38,6 +38,10 @@ export const routes: Routes = [
   {
     path: 'admin',
     loadComponent: () => import('./pages/admin/admin.page').then((m) => m.AdminPage),
+  },
+  {
+    path: 'inversion',
+    loadComponent: () => import('./pages/inversion/inversion.page').then((m) => m.InversionPage),
   },
   {
     path: 'support',

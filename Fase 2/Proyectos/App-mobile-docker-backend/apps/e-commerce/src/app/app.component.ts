@@ -33,6 +33,7 @@ import {
 } from 'ionicons/icons';
 
 import { CartDrawerComponent } from './components/cart-drawer.component';
+import { CookieBannerComponent } from './components/cookie-banner.component';
 import { LoginInviteComponent } from './components/login-invite.component';
 import { ShopNavComponent } from './components/shop-nav.component';
 import { AuthService } from './services/auth.service';
@@ -45,6 +46,7 @@ import { ToastService } from './services/toast.service';
   imports: [
     CommonModule,
     CartDrawerComponent,
+    CookieBannerComponent,
     LoginInviteComponent,
     ShopNavComponent,
     RouterOutlet,
@@ -142,6 +144,7 @@ import { ToastService } from './services/toast.service';
 
       <app-cart-drawer *ngIf="!isAdminOnly()"></app-cart-drawer>
 
+      <app-cookie-banner></app-cookie-banner>
       <!-- Invitación a iniciar sesión para los invitados, sin taparles la tienda -->
       <app-login-invite></app-login-invite>
 
@@ -207,7 +210,7 @@ export class AppComponent {
   showTabs = computed(() => this.auth.entryDismissed() && this.path() !== '/entry');
   onProfile = computed(() => this.path() === '/perfil');
   /** La barra de categorías va en las pantallas de la tienda, no en las del personal. */
-  showNav = computed(() => this.showHeader() && this.path() !== '/warehouse' && this.path() !== '/admin');
+  showNav = computed(() => this.showHeader() && !['/warehouse', '/admin', '/inversion'].includes(this.path()));
   /** El personal no compra en la tienda: no ve el carrito. */
   isAdminOnly = computed(() => this.auth.isAdmin());
 

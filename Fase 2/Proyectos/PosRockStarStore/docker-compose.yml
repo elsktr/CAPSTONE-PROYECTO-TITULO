@@ -30,6 +30,18 @@ services:
       retries: 3
       start_period: 10s
 
+  # Maquina de cobro simulada. Publicada en todas las interfaces: el POS la usa por
+  # http://<IP de este equipo>:8090 y su pantalla se abre desde un celular en la misma red.
+  terminal:
+    build:
+      context: terminal-simulada
+    restart: unless-stopped
+    environment:
+      # Milisegundos para aprobar solo cada cobro; 0 = se aprueba desde la pantalla.
+      APROBAR_AUTOMATICO_MS: ${TERMINAL_APROBAR_AUTOMATICO_MS:-0}
+    ports:
+      - "${TERMINAL_PUERTO:-8090}:8090"
+
 networks:
   rockstar:
     name: rockstar_default

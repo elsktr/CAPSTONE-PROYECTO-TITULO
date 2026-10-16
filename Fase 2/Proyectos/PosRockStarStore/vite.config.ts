@@ -14,5 +14,7 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/setupTests.ts',
+    // La maquina simulada (terminal-simulada/) se prueba con `npm run test.terminal`.
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
   }
 })

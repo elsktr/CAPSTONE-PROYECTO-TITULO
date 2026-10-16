@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test.e2e": "cypress run",
     "test.unit": "vitest",
+    "test.terminal": "node --test terminal-simulada/servidor.test.mjs",
     "lint": "eslint",
     "dev:up": "docker compose up --build"
   },
@@ -20,6 +21,8 @@
     "@capacitor/status-bar": "8.0.4",
     "@ionic/react": "^9.0.0",
     "@ionic/react-router": "^9.0.0",
+    "@zxing/browser": "0.1.5",
+    "@zxing/library": "0.21.3",
     "ionicons": "^8.1.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",

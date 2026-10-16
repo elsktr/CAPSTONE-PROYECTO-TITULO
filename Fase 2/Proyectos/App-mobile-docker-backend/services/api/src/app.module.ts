@@ -9,6 +9,7 @@ import { InventarioModule } from './inventario/inventario.module.js';
 import { LogisticaModule } from './logistica/logistica.module.js';
 import { SaludController } from './salud.controller.js';
 import { AuthController } from './usuarios/auth.controller.js';
+import { AnaliticaModule } from './analitica/analitica.module.js';
 import { AuthService } from './usuarios/auth.service.js';
 import { CuentasController } from './usuarios/cuentas.controller.js';
 import { VentasModule } from './ventas/ventas.module.js';
@@ -19,7 +20,7 @@ import { VentasModule } from './ventas/ventas.module.js';
  * gateway y los servicios, de modo que separarlos después no cambia a los clientes.
  */
 @Module({
-  imports: [DbModule, InventarioModule, LogisticaModule, VentasModule],
+  imports: [DbModule, InventarioModule, LogisticaModule, VentasModule, AnaliticaModule],
   controllers: [AuthController, CuentasController, SaludController],
   providers: [
     AuthService,

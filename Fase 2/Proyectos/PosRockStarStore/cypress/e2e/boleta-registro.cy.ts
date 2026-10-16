@@ -54,13 +54,12 @@ describe('POS - Boleta y Registro de Jornada', () => {
     cy.wait('@login');
     cy.wait('@catalogo');
     
-    cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click();
-      cy.get('.product-stepper ion-button').last().click();
-    });
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
+    cy.get('ion-card.product-card').first().find('.product-stepper ion-button').last().click();
     
     cy.get('ion-button.cobrar-button').click();
-    cy.get('ion-modal[is-open]').within(() => {
+    cy.contains('ion-button', 'Identificar cliente').click();
+    cy.get('.cliente-form').within(() => {
       cy.get('#cliente-email input').clear().type('cliente@rockstar.cl');
       cy.get('#cliente-password input').clear().type('password123');
       cy.get('ion-button[type="submit"]').click();
@@ -77,7 +76,7 @@ describe('POS - Boleta y Registro de Jornada', () => {
     cy.get('.boleta-info').should('contain', 'Boleta N°').and('contain', '103');
     cy.contains('Rockstar Store SpA').should('be.visible');
     cy.contains('76.123.456-7').should('be.visible');
-    cy.contains('Efectivo').should('be.visible');
+    cy.get('.boleta-info').should('contain', 'Efectivo');
     cy.get('.boleta-totales').should('contain', '$30.000');
     cy.get('.boleta-lineas').should('contain', 'Polera Rockstar');
     cy.contains('Gracias por su compra').should('be.visible');
@@ -92,12 +91,11 @@ describe('POS - Boleta y Registro de Jornada', () => {
     cy.wait('@login');
     cy.wait('@catalogo');
     
-    cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click();
-    });
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
     
     cy.get('ion-button.cobrar-button').click();
-    cy.get('ion-modal[is-open]').within(() => {
+    cy.contains('ion-button', 'Identificar cliente').click();
+    cy.get('.cliente-form').within(() => {
       cy.get('#cliente-email input').clear().type('cliente@rockstar.cl');
       cy.get('#cliente-password input').clear().type('password123');
       cy.get('ion-button[type="submit"]').click();
@@ -160,16 +158,14 @@ describe('POS - Boleta y Registro de Jornada', () => {
     cy.wait('@catalogoDinamico');
 
     const stockInicial = 7;
+    cy.get('.scan-input').type('POL-NEG-M{enter}');
     cy.get('ion-card.product-card').first().within(() => {
       cy.get('.stock').should('contain', `Disp: ${stockInicial}`);
     });
 
-    cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.product-stepper ion-button').last().click();
-    });
-
     cy.get('ion-button.cobrar-button').click();
-    cy.get('ion-modal[is-open]').within(() => {
+    cy.contains('ion-button', 'Identificar cliente').click();
+    cy.get('.cliente-form').within(() => {
       cy.get('#cliente-email input').clear().type('cliente@rockstar.cl');
       cy.get('#cliente-password input').clear().type('password123');
       cy.get('ion-button[type="submit"]').click();
@@ -185,8 +181,9 @@ describe('POS - Boleta y Registro de Jornada', () => {
     cy.contains('Boleta de Venta').should('be.visible');
     cy.get('ion-button.boleta-cerrar-btn').click();
 
-    cy.get('ion-card.product-card').first().within(() => {
-      cy.get('.stock').should('contain', `Disp: ${stockInicial - 1}`);
-    });
+    // Tras la venta la grilla queda vacia; el stock al dia se ve en la busqueda.
+    cy.get('ion-card.product-card').should('not.exist');
+    cy.get('.scan-input').type('POL-NEG-M');
+    cy.get('.buscador-opcion').first().should('contain', `Disp: ${stockInicial - 1}`);
   });
 });

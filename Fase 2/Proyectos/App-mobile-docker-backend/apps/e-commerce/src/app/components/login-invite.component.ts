@@ -5,6 +5,7 @@ import { IonIcon } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
 import { closeOutline, personCircleOutline } from 'ionicons/icons';
 import { AuthService } from '../services/auth.service';
+import { cookieBannerVisible } from './cookie-banner.component';
 
 /** Si el invitado cerró el recuadro, no vuelve a aparecer mientras siga abierta la pestaña. */
 const DISMISSED_KEY = 'rockstar.tienda.aviso-sesion';
@@ -93,8 +94,9 @@ export class LoginInviteComponent {
   private readonly path = signal(this.router.url.split('?')[0]);
   private readonly dismissed = signal(wasDismissed());
 
+  // Espera a que se responda el aviso de cookies: los dos van abajo y se taparían.
   shown = computed(
-    () => !this.dismissed() && !this.auth.isLoggedIn() && STORE_PATHS.includes(this.path()),
+    () => !cookieBannerVisible() && !this.dismissed() && !this.auth.isLoggedIn() && STORE_PATHS.includes(this.path()),
   );
 
   constructor() {
