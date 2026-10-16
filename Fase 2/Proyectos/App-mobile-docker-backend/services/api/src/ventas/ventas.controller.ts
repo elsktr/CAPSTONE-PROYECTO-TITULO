@@ -1,8 +1,9 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
-import type { CheckoutResponse, CompraPendiente, ComprobantePos, ResultadoPago, Usuario } from '@rockstar/contracts';
+import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
+import type { CheckoutResponse, CompraPendiente, ComprobantePos, ResultadoPago, Usuario, VentaResumen } from '@rockstar/contracts';
 
 import { Publica, Roles, UsuarioActual } from '../auth/decoradores.js';
 import { ComprasService } from './compras.service.js';
+import { ResumenVentasService } from './resumen-ventas.service.js';
 import { VentasPosService } from './ventas-pos.service.js';
 
 /**
@@ -14,7 +15,15 @@ export class VentasController {
   constructor(
     private readonly compras: ComprasService,
     private readonly pos: VentasPosService,
+    private readonly resumen: ResumenVentasService,
   ) {}
+
+  /** Ventas pagadas de la tienda web y del POS, juntas. Con `desde` (AAAA-MM-DD), solo las de ese día en adelante. Exige sesión de Gerente. */
+  @Get('ventas')
+  @Roles('GERENTE')
+  ventas(@Query('desde') desde?: string): Promise<VentaResumen[]> {
+    return this.resumen.pagadas(desde);
+  }
 
   /** Registra una venta en la tienda, descuenta el stock y devuelve el comprobante. Exige sesión de Vendedor. */
   @Post('ventas/pos')

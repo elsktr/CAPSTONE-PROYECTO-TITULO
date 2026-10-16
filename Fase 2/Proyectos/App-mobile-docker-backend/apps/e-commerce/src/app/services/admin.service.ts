@@ -9,6 +9,7 @@ import type {
   ProductoEdicionRequest,
   Ubicacion,
   VarianteGestion,
+  VentaResumen,
 } from '@rockstar/contracts';
 import { firstValueFrom } from 'rxjs';
 
@@ -36,6 +37,29 @@ export interface StockRow {
   stock: number;
   reserved: number;
   available: number;
+}
+
+/** Períodos con que se filtran las ventas en Finanzas. */
+export type SalesPeriod = 'today' | 'week' | 'month' | 'all';
+
+/** Primer día del período, en la fecha de Chile (AAAA-MM-DD); `null` para todas las ventas. */
+export function periodStart(period: SalesPeriod, now = new Date()): string | null {
+  const days = { today: 0, week: 6, month: 29, all: null }[period];
+  if (days === null) {
+    return null;
+  }
+  const start = new Date(now.getTime() - days * 86_400_000);
+  return start.toLocaleDateString('sv-SE', { timeZone: 'America/Santiago' });
+}
+
+/** Total y cantidad de ventas de un canal. */
+export interface ChannelTotals {
+  total: number;
+  count: number;
+}
+
+function totalsOf(sales: VentaResumen[]): ChannelTotals {
+  return { total: sales.reduce((sum, s) => sum + s.total, 0), count: sales.length };
 }
 
 function toRow(variante: VarianteGestion): StockRow {
@@ -73,6 +97,14 @@ export class AdminService {
   readonly losses = signal<Movimiento[]>([]);
   readonly orders = signal<Pedido[]>([]);
   readonly staff = signal<CuentaInterna[]>([]);
+  /** Ventas pagadas de la tienda web y del POS en el período elegido, de la más reciente a la más antigua. */
+  readonly sales = signal<VentaResumen[]>([]);
+
+  readonly webSales = computed(() => totalsOf(this.sales().filter((s) => s.canal === 'ECOMMERCE')));
+  readonly storeSales = computed(() => totalsOf(this.sales().filter((s) => s.canal === 'POS')));
+  readonly allSales = computed(() => totalsOf(this.sales()));
+  /** Lo que pagaron los clientes por el despacho; es parte del total de las ventas web. */
+  readonly shippingCharged = computed(() => this.sales().reduce((sum, s) => sum + s.flete, 0));
 
   readonly totalUnits = computed(() => this.inventory().reduce((sum, p) => sum + p.stock, 0));
   readonly lowStockCount = computed(() => this.inventory().filter((p) => p.active && p.stock <= 3).length);
@@ -112,10 +144,18 @@ export class AdminService {
     this.inventory.set(variantes.map(toRow));
   }
 
+  /** Ventas de ambos canales desde el inicio del período. */
+  async loadSales(period: SalesPeriod): Promise<void> {
+    const desde = periodStart(period);
+    const params: Record<string, string> = desde ? { desde } : {};
+    this.sales.set(await firstValueFrom(this.http.get<VentaResumen[]>(`${API_URL}/ventas`, { params })));
+  }
+
   /** Lo que muestra la vista de finanzas, que es del Gerente. */
-  async loadFinance(): Promise<void> {
-    const [, losses, orders, staff] = await Promise.all([
+  async loadFinance(period: SalesPeriod): Promise<void> {
+    const [, , losses, orders, staff] = await Promise.all([
       this.loadInventory(),
+      this.loadSales(period),
       firstValueFrom(this.http.get<Movimiento[]>(`${API_URL}/inventario/movimientos`, { params: { tipo: 'MERMA' } })),
       firstValueFrom(this.http.get<Pedido[]>(`${API_URL}/logistica/pedidos`)),
       firstValueFrom(this.http.get<CuentaInterna[]>(`${API_URL}/usuarios/internos`)),

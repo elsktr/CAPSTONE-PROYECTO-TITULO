@@ -1,7 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
 import type { PGlite } from '@electric-sql/pglite';
-import type { ComprobantePos, ErrorApi, LineaEnBodega, SesionResponse, VentaPosRequest } from '@rockstar/contracts';
+import type {
+  CheckoutResponse,
+  Comuna,
+  ComprobantePos,
+  ErrorApi,
+  LineaEnBodega,
+  SesionResponse,
+  VentaPosRequest,
+  VentaResumen,
+} from '@rockstar/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { iniciarEntornoLocal } from './entorno-local.mjs';
@@ -184,5 +193,56 @@ describe('ventas POS del día', () => {
 
     expect((await llamar<ErrorApi>('GET', '/ventas/pos', undefined, bodega)).status).toBe(403);
     expect((await llamar<ErrorApi>('GET', '/ventas/pos', undefined, cliente)).status).toBe(403);
+  });
+});
+
+describe('ventas de todos los canales (Finanzas)', () => {
+  it('el Gerente ve juntas las ventas pagadas de la tienda web y del POS, y nadie más las consulta', async () => {
+    const { cuerpo: enTienda } = await vender({ lineas: [{ idVariante: RAYO, cantidad: 1, permitirBodega: true }] });
+
+    const comunas = (await llamar<Comuna[]>('GET', '/logistica/comunas?region=7')).cuerpo;
+    const providencia = comunas.find((c) => c.nombre === 'Providencia')!.idComuna;
+    const despacho = { idComuna: providencia, direccion: 'Av. Siempre Viva 742', destinatario: 'Cliente Demo', telefono: '+56 9 1234 5678' };
+    const { cuerpo: web } = await llamar<CheckoutResponse>(
+      'POST',
+      '/ventas/checkout',
+      { claveIdempotencia: randomUUID(), lineas: [{ idVariante: EDDIE, cantidad: 2 }], despacho },
+      cliente,
+    );
+    // Hasta que se paga, la compra web no es una venta.
+    const antesDelPago = (await llamar<VentaResumen[]>('GET', '/ventas', undefined, gerente)).cuerpo;
+    expect(antesDelPago.some((v) => v.idVenta === web.idVenta)).toBe(false);
+    await llamar('POST', '/pagos/webpay/retorno', { tokenPago: web.tokenPago, aprobar: true });
+
+    const { status, cuerpo: ventas } = await llamar<VentaResumen[]>('GET', '/ventas', undefined, gerente);
+    expect(status).toBe(200);
+    expect(ventas.find((v) => v.idVenta === enTienda.idVenta)).toMatchObject({
+      canal: 'POS',
+      total: 14990,
+      flete: 0,
+      unidades: 1,
+      vendedor: 'Vendedor Demo',
+      medioPago: 'Efectivo',
+    });
+    expect(ventas.find((v) => v.idVenta === web.idVenta)).toMatchObject({
+      canal: 'ECOMMERCE',
+      total: web.total,
+      flete: web.flete,
+      unidades: 2,
+      cliente: 'Cliente Demo',
+      vendedor: null,
+    });
+    expect(ventas.map((v) => v.fecha)).toEqual([...ventas.map((v) => v.fecha)].sort().reverse());
+
+    // Solo desde una fecha: hoy las incluye, mañana no.
+    const hoy = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Santiago' });
+    const manana = new Date(Date.now() + 86_400_000).toLocaleDateString('sv-SE', { timeZone: 'America/Santiago' });
+    expect((await llamar<VentaResumen[]>('GET', `/ventas?desde=${hoy}`, undefined, gerente)).cuerpo.map((v) => v.idVenta)).toContain(web.idVenta);
+    expect((await llamar<VentaResumen[]>('GET', `/ventas?desde=${manana}`, undefined, gerente)).cuerpo).toEqual([]);
+    expect((await llamar<ErrorApi>('GET', '/ventas?desde=ayer', undefined, gerente)).status).toBe(400);
+
+    for (const token of [vendedor, bodega, cliente]) {
+      expect((await llamar<ErrorApi>('GET', '/ventas', undefined, token)).status).toBe(403);
+    }
   });
 });
