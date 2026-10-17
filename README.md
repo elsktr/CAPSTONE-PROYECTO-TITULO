@@ -20,7 +20,7 @@ Las tres hablan con un mismo backend y una misma base de datos. Una prenda vendi
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 ![Vitest](https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=white)
 ![Cypress](https://img.shields.io/badge/Cypress-69D3A7?logo=cypress&logoColor=black)
-![Pruebas](https://img.shields.io/badge/pruebas-448%20pasando-brightgreen)
+![Pruebas](https://img.shields.io/badge/pruebas-567-brightgreen)
 
 > 📄 **[Informe de avance de la Fase 2](<Fase 2/Evidencias Proyecto/README.md>)**: resumen del avance, monitoreo del plan de trabajo, ajustes y capturas del sistema.
 
@@ -79,18 +79,18 @@ Cifras del diagnóstico de la tienda, en la propuesta del proyecto (`openspec/ch
 
 ### El sistema
 
-Medido sobre el código de `Fase 2/Proyectos` el 5 de octubre de 2026.
+Líneas de código medidas sobre `Fase 2/Proyectos` el 5 de octubre de 2026; endpoints, migraciones y contenedores al 16 de octubre.
 
 | Componente | Líneas de código¹ | Detalle |
 |---|---:|---|
-| Backend (NestJS) | 3.354 | 41 endpoints REST en 7 controladores |
+| Backend (NestJS) | 3.354 | 44 endpoints REST |
 | Pruebas del backend | 2.118 | contrato de la API contra PostgreSQL en memoria |
 | Contratos compartidos | 489 | tipos TypeScript entre backend y clientes |
 | App de bodega (Ionic Angular) | 9.369 | 13 pantallas; incluye sus pruebas |
 | Tienda web (Ionic Angular) | 4.105 | 10 páginas |
 | POS (Ionic React) | 2.848 | incluye pruebas unitarias |
 | Pruebas end-to-end del POS (Cypress) | 806 | 7 escenarios de uso |
-| Base de datos (SQL) | 550 | 10 migraciones |
+| Base de datos (SQL) | 550 | 11 migraciones |
 | **Total** | **23.639** | |
 
 ¹ Líneas no vacías de TypeScript, HTML, SCSS, CSS, SQL y JavaScript. Sin dependencias ni archivos generados.
@@ -99,30 +99,32 @@ Medido sobre el código de `Fase 2/Proyectos` el 5 de octubre de 2026.
 |---|---:|
 | Esquemas (uno por dominio: usuarios, inventario, ventas, pagos, logística) | 5 |
 | Tablas | 36 |
-| Migraciones | 10 |
+| Migraciones | 11 |
 | Roles de usuario | 5 |
 | Regiones y comunas de Chile cargadas | 16 y 346 |
 | Fotos de bandas en el catálogo de semillas | 17 |
 
 | Despliegue | |
 |---|---:|
-| Contenedores Docker | 5 (base de datos, API, app de bodega, tienda, POS) |
+| Contenedores Docker | 6 (base de datos, API, app de bodega, tienda, POS y máquina de cobro simulada) |
 | Comando para levantar todo | 2 (`docker compose up` en cada proyecto) |
 
 ### Calidad
 
-Resultado de la última ejecución, el 5 de octubre de 2026. **Pasan las 448 pruebas.**
+Resultado de la última ejecución, el 16 de octubre de 2026: **567 pruebas**. Pasan las 522 que se ejecutaron; las 45 de Cypress se contaron en el código, porque necesitan el POS levantado.
 
 | Suite | Herramienta | Pruebas | Resultado |
 |---|---|---:|---|
-| Backend, unitarias | Vitest | 11 | ✅ 11/11 |
-| Backend, contrato de la API (end-to-end) | Vitest + PGlite | 146 | ✅ 146/146 |
+| Backend, unitarias | Vitest | 33 | ✅ 33/33 |
+| Backend, contrato de la API (end-to-end) | Vitest + PGlite | 158 | ✅ 158/158 |
 | App de bodega | Vitest (Angular) | 251 | ✅ 251/251 |
-| POS, unitarias | Vitest | 14 | ✅ 14/14 |
-| POS, end-to-end en navegador | Cypress | 26 | ✅ 26/26 |
-| **Total** | | **448** | ✅ |
+| Tienda web (probador 3D y Roxy) | Vitest | 38 | ✅ 38/38 |
+| POS, unitarias | Vitest | 36 | ✅ 36/36 |
+| POS, máquina de cobro simulada | node:test | 6 | ✅ 6/6 |
+| POS, end-to-end en navegador | Cypress | 45 | No ejecutadas en esta medición |
+| **Total** | | **567** | |
 
-La tienda web todavía no tiene pruebas automatizadas propias. Su flujo de compra lo cubren las pruebas de contrato del backend (`services/api/test/tienda.e2e.spec.ts`).
+El flujo de compra de la tienda web también lo cubren las pruebas de contrato del backend (`services/api/test/tienda.e2e.spec.ts`).
 
 ---
 
