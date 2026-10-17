@@ -20,7 +20,7 @@ Las tres hablan con un mismo backend y una misma base de datos. Una prenda vendi
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 ![Vitest](https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=white)
 ![Cypress](https://img.shields.io/badge/Cypress-69D3A7?logo=cypress&logoColor=black)
-![Pruebas](https://img.shields.io/badge/pruebas-567-brightgreen)
+![Pruebas](https://img.shields.io/badge/pruebas-567%20pasando-brightgreen)
 
 > 📄 **[Informe de avance de la Fase 2](<Fase 2/Evidencias Proyecto/README.md>)**: resumen del avance, monitoreo del plan de trabajo, ajustes y capturas del sistema.
 
@@ -111,7 +111,7 @@ Líneas de código medidas sobre `Fase 2/Proyectos` el 5 de octubre de 2026; end
 
 ### Calidad
 
-Resultado de la última ejecución, el 16 de octubre de 2026: **567 pruebas**. Pasan las 522 que se ejecutaron; las 45 de Cypress se contaron en el código, porque necesitan el POS levantado.
+Resultado de la última ejecución, el 17 de octubre de 2026. **Pasan las 567 pruebas.**
 
 | Suite | Herramienta | Pruebas | Resultado |
 |---|---|---:|---|
@@ -121,8 +121,8 @@ Resultado de la última ejecución, el 16 de octubre de 2026: **567 pruebas**. P
 | Tienda web (probador 3D y Roxy) | Vitest | 38 | ✅ 38/38 |
 | POS, unitarias | Vitest | 36 | ✅ 36/36 |
 | POS, máquina de cobro simulada | node:test | 6 | ✅ 6/6 |
-| POS, end-to-end en navegador | Cypress | 45 | No ejecutadas en esta medición |
-| **Total** | | **567** | |
+| POS, end-to-end en navegador | Cypress | 45 | ✅ 45/45 |
+| **Total** | | **567** | ✅ |
 
 El flujo de compra de la tienda web también lo cubren las pruebas de contrato del backend (`services/api/test/tienda.e2e.spec.ts`).
 
