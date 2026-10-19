@@ -14,7 +14,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { IonButton, IonIcon, ModalController } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
-import { addOutline, closeOutline, refreshOutline } from 'ionicons/icons';
+import { addOutline, closeOutline, informationCircleOutline, refreshOutline } from 'ionicons/icons';
 
 import { Product, formatCLP } from '../data/models';
 import {
@@ -25,6 +25,7 @@ import {
   MedidasCliente,
   colorDePrenda,
   estimarCuerpo,
+  reescalarMedidas,
   evaluarAjuste,
   medidasDeTalla,
   mismaTalla,
@@ -77,6 +78,7 @@ const COMPLEXIONES: { valor: Complexion; nombre: string }[] = [
 
 const TEXTO_ANCHO = { apretada: 'Te quedaría apretada', justa: 'Te quedaría bien', holgada: 'Te quedaría holgada' } as const;
 const TEXTO_LARGO = { corta: 'corta de largo', adecuada: 'de largo adecuado', larga: 'larga' } as const;
+const TEXTO_MANGA = { corta: 'Manga corta para tu brazo', adecuada: 'Manga de largo adecuado', larga: 'Manga larga para tu brazo' } as const;
 
 /** Probador virtual: maniquí 3D con la altura y el peso del cliente, vestido con la talla elegida. */
 @Component({
@@ -105,6 +107,15 @@ const TEXTO_LARGO = { corta: 'corta de largo', adecuada: 'de largo adecuado', la
         </div>
 
         <div class="panel">
+          <div class="descargo" role="note">
+            <ion-icon name="information-circle-outline" aria-hidden="true"></ion-icon>
+            <p>
+              <strong>Es una simulación.</strong> El maniquí y la talla recomendada son estimaciones a partir de tus medidas
+              y de las medidas de la prenda: no garantizan que te quede exactamente igual. Ante la duda, revisa la tabla de
+              tallas o escríbenos.
+            </p>
+          </div>
+
           <section>
             <div class="lbl">Cuerpo</div>
             <div class="complexion" role="group" aria-label="Cuerpo del maniquí">
@@ -128,7 +139,7 @@ const TEXTO_LARGO = { corta: 'corta de largo', adecuada: 'de largo adecuado', la
             </div>
             <details class="medidas-extra" [open]="tieneContornos()">
               <summary>Medidas del cuerpo <span>(opcional)</span></summary>
-              <p class="ayuda-medidas">Si las conoces, el maniquí y la talla usan tus medidas. Vacías, se estiman.</p>
+              <p class="ayuda-medidas">Si las conoces, el maniquí y la talla usan tus medidas; la cadera cambia con tu peso y tu altura. Vacías, se estiman.</p>
               <div class="contornos">
                 <label *ngFor="let c of contornos" [for]="'probador-' + c.medida">
                   {{ c.nombre }}
@@ -185,10 +196,15 @@ const TEXTO_LARGO = { corta: 'corta de largo', adecuada: 'de largo adecuado', la
               <strong>Talla única</strong>: se ajusta con la hebilla.
             </ng-container>
             <ng-template #conAjuste>
-              <strong>Talla {{ a.talla }}:</strong> {{ textoAncho[a.ancho] }} y {{ textoLargo[a.largo] }}.
+              <strong>Talla {{ a.talla }}<ng-container *ngIf="equivalencia() as e"> (US {{ e }})</ng-container>:</strong> {{ textoAncho[a.ancho] }} y {{ textoLargo[a.largo] }}.<ng-container *ngIf="a.manga"> {{ textoManga[a.manga] }}.</ng-container>
               <div class="detalle">Holgura estimada: {{ a.holgura > 0 ? '+' : '' }}{{ a.holgura }} cm sobre tu {{ tipo() === 'pantalon' ? 'cintura' : 'pecho' }}.</div>
             </ng-template>
           </section>
+
+          <p class="nota medida-ajustada" *ngFor="let a of cuerpo().ajustadas" role="status">
+            {{ nombreContorno[a.medida] }} de {{ a.ingresada }} cm no calza con tu altura y peso; usamos {{ a.usada }} cm.
+            Revisa la medida.
+          </p>
 
           <p class="nota" *ngIf="!tieneContornos(); else conContornos">
             Medidas estimadas desde tu altura y peso ({{ cuerpo().pecho }} cm de pecho, {{ cuerpo().cintura }} cm de cintura).
@@ -252,6 +268,11 @@ const TEXTO_LARGO = { corta: 'corta de largo', adecuada: 'de largo adecuado', la
     .estrella { position: absolute; top: -7px; right: -5px; font-size: 12px; color: #facc15; }
     .recomendacion, .nota { margin: 0; font-size: 13px; color: var(--text-muted); }
     .nota { font-size: 11px; color: var(--text-faint); line-height: 1.5; }
+    .nota.medida-ajustada { padding: 8px 10px; border-radius: 10px; background: rgba(161, 98, 7, 0.18); border: 1px solid rgba(250, 204, 21, 0.35); color: #fde68a; font-size: 12px; }
+    .descargo { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); }
+    .descargo ion-icon { flex: none; font-size: 18px; color: #7dd3fc; margin-top: 1px; }
+    .descargo p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+    .descargo strong { color: var(--text); }
     .ajuste { padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; border: 1px solid; }
     .ajuste[data-ancho=justa] { background: rgba(22, 101, 52, 0.25); border-color: rgba(34, 197, 94, 0.4); }
     .ajuste[data-ancho=apretada] { background: rgba(127, 29, 29, 0.3); border-color: rgba(239, 68, 68, 0.45); }
@@ -289,6 +310,8 @@ export class ProbadorComponent implements AfterViewInit, OnDestroy {
   readonly limites = LIMITES;
   readonly textoAncho = TEXTO_ANCHO;
   readonly textoLargo = TEXTO_LARGO;
+  readonly textoManga = TEXTO_MANGA;
+  readonly nombreContorno = { pecho: 'Un pecho', cintura: 'Una cintura', cadera: 'Una cadera' } as const;
   readonly formatCLP = formatCLP;
 
   readonly contornos = CONTORNOS;
@@ -317,7 +340,7 @@ export class ProbadorComponent implements AfterViewInit, OnDestroy {
   readonly error = computed(() => validarMedidas(this.medidas()));
   readonly tieneContornos = computed(() => this.pecho() !== null || this.cintura() !== null || this.cadera() !== null);
   /** Lo que se estimaría sin contornos: se muestra como sugerencia en los campos vacíos. */
-  readonly estimados = computed(() => estimarCuerpo({ altura: this.altura(), peso: this.peso(), complexion: this.complexion() }));
+  readonly estimados = computed(() => estimarCuerpo({ altura: this.altura(), peso: this.peso(), complexion: this.complexion(), sexo: this.sexo() }));
 
   /** Mientras el cliente escribe un valor fuera de rango, el maniquí se queda con las últimas medidas válidas. */
   private ultimasValidas = this.inicial;
@@ -328,28 +351,30 @@ export class ProbadorComponent implements AfterViewInit, OnDestroy {
   });
 
   /** Siempre hay tipo: la tienda solo ofrece Probar en categorías que el probador simula. */
-  readonly tipo = computed(() => tipoDePrenda(this.producto().category) ?? 'polera');
+  readonly tipo = computed(() => tipoDePrenda(this.producto().category, this.producto().name) ?? 'polera');
   readonly recomendada = computed(() => recomendarTalla(this.cuerpo(), this.tipo()));
   readonly tallas = computed(() =>
     tablaDeTallas(this.tipo()).map(({ talla }) => ({ talla, variante: this.varianteDe(talla) })),
   );
 
-  /** Talla tocada por el cliente; mientras no toque ninguna, se sigue la recomendación. */
+  /**
+   * Talla tocada por el cliente. Mientras no toque ninguna se muestra la recomendada, y cada vez
+   * que la recomendación cambia (al mover el peso, la altura o las medidas) se vuelve a ella.
+   */
   readonly seleccion = signal<string | null>(null);
-  readonly tallaElegida = computed(() => {
-    const elegida = this.seleccion();
-    if (elegida) return elegida;
-    const recomendada = this.recomendada();
-    if (this.varianteDe(recomendada)) return recomendada;
-    return medidasDeTalla(this.tipo(), this.producto().size)?.talla ?? recomendada;
-  });
+  readonly tallaElegida = computed(() => this.seleccion() ?? this.recomendada());
   readonly varianteElegida = computed(() => this.varianteDe(this.tallaElegida()));
   readonly ajuste = computed(() => evaluarAjuste(this.cuerpo(), this.tipo(), this.tallaElegida()));
+  /** Talla americana del fabricante, en los pantalones. */
+  readonly equivalencia = computed(() => medidasDeTalla(this.tipo(), this.tallaElegida())?.equivalencia ?? null);
 
   readonly prendaEnEscena = computed<PrendaEnEscena | null>(() => {
     const medidas = medidasDeTalla(this.tipo(), this.tallaElegida());
     if (!medidas) return null;
-    return { tipo: this.tipo(), contorno: medidas.contornoPrenda, largo: medidas.largo, color: colorDePrenda(this.producto().color) };
+    const color = colorDePrenda(this.producto().color);
+    // La polera manga larga se dibuja con el modelo 3D de manga larga, el del polerón.
+    const tipo = this.tipo() === 'polera_manga_larga' ? 'poleron' : this.tipo();
+    return { tipo, contorno: medidas.contornoPrenda, largo: medidas.largo, color };
   });
 
   readonly escena = signal<EscenaManiqui | null>(null);
@@ -358,7 +383,18 @@ export class ProbadorComponent implements AfterViewInit, OnDestroy {
   private destruido = false;
 
   constructor() {
-    addIcons({ 'add-outline': addOutline, 'close-outline': closeOutline, 'refresh-outline': refreshOutline });
+    // La recomendación cambió: la talla puesta pasa a ser la nueva recomendada.
+    let ultimaRecomendada: string | null = null;
+    effect(
+      () => {
+        const recomendada = this.recomendada();
+        if (ultimaRecomendada !== null && recomendada !== ultimaRecomendada) this.seleccion.set(null);
+        ultimaRecomendada = recomendada;
+      },
+      { allowSignalWrites: true },
+    );
+
+    addIcons({ 'add-outline': addOutline, 'close-outline': closeOutline, 'refresh-outline': refreshOutline, 'information-circle-outline': informationCircleOutline });
 
     effect(() => {
       const medidas = this.medidas();
@@ -413,11 +449,31 @@ export class ProbadorComponent implements AfterViewInit, OnDestroy {
   }
 
   cambiarAltura(evento: Event): void {
-    this.altura.set(Math.round(Number((evento.target as HTMLInputElement).value)));
+    this.cambiarCuerpo({ altura: Math.round(Number((evento.target as HTMLInputElement).value)), peso: this.peso() });
   }
 
   cambiarPeso(evento: Event): void {
-    this.peso.set(Math.round(Number((evento.target as HTMLInputElement).value)));
+    this.cambiarCuerpo({ altura: this.altura(), peso: Math.round(Number((evento.target as HTMLInputElement).value)) });
+  }
+
+  /**
+   * Medidas tal como el cliente las escribió, con la altura y el peso de ese momento: desde ahí se
+   * recalculan al mover el peso o la altura, así el redondeo no se acumula paso a paso.
+   */
+  private referencia: MedidasCliente | null = null;
+
+  /** La altura y el peso nuevos, y las medidas ingresadas cambiadas en la misma proporción. */
+  private cambiarCuerpo(despues: { altura: number; peso: number }): void {
+    const actual = this.medidas();
+    if (!this.referencia || validarMedidas({ altura: this.referencia.altura, peso: this.referencia.peso })) {
+      this.referencia = actual;
+    }
+    const nuevo = reescalarMedidas({ ...this.referencia, complexion: actual.complexion, sexo: actual.sexo }, despues);
+    this.altura.set(despues.altura);
+    this.peso.set(despues.peso);
+    this.pecho.set(nuevo.pecho ?? null);
+    this.cintura.set(nuevo.cintura ?? null);
+    this.cadera.set(nuevo.cadera ?? null);
   }
 
   contorno(medida: Contorno): number | null {
@@ -429,6 +485,7 @@ export class ProbadorComponent implements AfterViewInit, OnDestroy {
     const texto = (evento.target as HTMLInputElement).value.trim();
     const valor = texto === '' ? null : Math.round(Number(texto));
     ({ pecho: this.pecho, cintura: this.cintura, cadera: this.cadera })[medida].set(valor);
+    this.referencia = null;
   }
 
   reiniciarMedidas(): void {
@@ -439,6 +496,7 @@ export class ProbadorComponent implements AfterViewInit, OnDestroy {
     this.cadera.set(null);
     this.complexion.set('media');
     this.seleccion.set(null);
+    this.referencia = null;
   }
 
   agregar(): void {

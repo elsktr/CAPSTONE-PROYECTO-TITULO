@@ -9,6 +9,8 @@ deformaciones (morph targets) de un mismo cuerpo:
     pecho_mas / pecho_menos       contorno de busto (control de medidas de MakeHuman)
     cintura_mas / cintura_menos   contorno de cintura
     cadera_mas / cadera_menos     contorno de cadera
+    volumen_mas                   más volumen en brazos, piernas y cuello: lleva el cuerpo más allá
+                                  del tope de peso de MakeHuman sin que solo crezca el torso
 
 Las prendas (polera, pantalón, polerón y chaqueta) salen de conjuntos de ropa de MakeHuman (CC0),
 ajustados con MPFB a cada variante del cuerpo: tienen las mismas deformaciones, así que en la
@@ -37,6 +39,7 @@ import bmesh
 import bpy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import confeccion  # noqa: E402
 import cuerpo_mpfb as cm  # noqa: E402
 
 from bl_ext.blender_org.mpfb.entities.clothes.mhclo import Mhclo  # noqa: E402
@@ -61,6 +64,21 @@ PRENDAS = {
 }
 
 CONTORNOS = ("pecho", "cintura", "cadera")
+
+# Formas de MakeHuman que forman la variante "volumen": la grasa de brazos, piernas y cuello, que
+# el parámetro de peso deja de agregar en su tope. Se aplican todas juntas, con este peso.
+VOLUMEN = {
+    **{f"{lado}-{parte}-fat-incr": 1.0 for lado in "lr" for parte in ("upperarm", "lowerarm", "upperleg", "lowerleg")},
+    "measure-upperarm-circ-incr": 0.6,
+    "measure-thigh-circ-incr": 0.6,
+    "measure-calf-circ-incr": 0.5,
+    "measure-neck-circ-incr": 0.6,
+    "neck-double-incr": 0.5,
+    # El abdomen y el ancho del torso: el control de cintura solo no alcanza en los cuerpos pesados.
+    "stomach-pregnant-incr": 0.8,
+    "measure-underbust-circ-incr": 0.6,
+    "torso-scale-depth-incr": 0.5,
+}
 TOPE_CONTROL = cm.TOPE_CONTROL
 # Lado de la textura de relieve de la tela en la tienda.
 LADO_TEXTURA = 1024
@@ -116,6 +134,12 @@ def variantes(sexo, conjuntos):
             otro = humano(dict(base, **{parametro: valor}))
             tomar(f"{nombre}_{sentido}", otro)
             bpy.data.objects.remove(otro)
+
+    for nombre, peso in VOLUMEN.items():
+        TargetService.load_target(cuerpo, TargetService.target_full_path(nombre), weight=peso, name=nombre)
+    tomar("volumen_mas", cuerpo)
+    for nombre in VOLUMEN:
+        cuerpo.data.shape_keys.key_blocks[nombre].value = 0.0
 
     for contorno in CONTORNOS:
         for sentido_mh, sentido in (("incr", "mas"), ("decr", "menos")):
@@ -295,7 +319,8 @@ def tablas(objeto):
     pasos = [round(-1 + i * 0.1, 2) for i in range(21)]
     pasos_control = [round(-1 + i * 0.1, 2) for i in range(int((TOPE_CONTROL + 1) / 0.1) + 1)]
     resultado = {}
-    for parametro, valores in (("altura", pasos), ("peso", pasos), *((m, pasos_control) for m in CONTORNOS)):
+    pasos_volumen = [round(i * 0.1, 2) for i in range(11)]
+    for parametro, valores in (("altura", pasos), ("peso", pasos), ("volumen", pasos_volumen), *((m, pasos_control) for m in CONTORNOS)):
         filas = []
         for valor in valores:
             aplicar([objeto], pesos_de(parametro, valor))
@@ -381,6 +406,11 @@ def invertir(filas, campo, objetivo):
     return filas[0]["valor"] if objetivo < filas[0][campo] else filas[-1]["valor"]
 
 
+def volumen_de(imc):
+    """Variante de volumen para un IMC: nada hasta 31 (tope del peso de MakeHuman), todo en 43."""
+    return min(max((imc - 31) / 12, 0.0), 1.0)
+
+
 def resolver(tabla, altura, peso, objetivos):
     """
     Pesos de las deformaciones y escala para una altura, un peso y unos contornos. Es el mismo
@@ -388,12 +418,14 @@ def resolver(tabla, altura, peso, objetivos):
     """
     imc = peso / (altura / 100) ** 2
     valor_peso = min(max((imc - 17) / 14, 0.0), 1.0) * 2 - 1
+    valor_volumen = volumen_de(imc)
     valor_altura = invertir(tabla["altura"], "altura", altura)
     escala = altura / interpolar(tabla["altura"], "altura", valor_altura)
-    valores = {"altura": valor_altura, "peso": valor_peso}
+    valores = {"altura": valor_altura, "peso": valor_peso, "volumen": valor_volumen}
     for m in CONTORNOS:
         base = interpolar(tabla[m], m, 0.0)
-        sin_control = base + (interpolar(tabla["altura"], m, valor_altura) - base) + (interpolar(tabla["peso"], m, valor_peso) - base)
+        sin_control = (base + (interpolar(tabla["altura"], m, valor_altura) - base) + (interpolar(tabla["peso"], m, valor_peso) - base)
+                       + (interpolar(tabla["volumen"], m, valor_volumen) - base))
         diferencia = objetivos[m] / escala - sin_control
         filas = [{"valor": f["valor"], "delta": f[m] - base} for f in tabla[m]]
         valores[m] = invertir(filas, "delta", diferencia)
@@ -401,7 +433,8 @@ def resolver(tabla, altura, peso, objetivos):
 
 
 def validar(objeto, tabla):
-    casos = [(175, 78, 100, 86, 98), (165, 55, None, None, None), (175, 110, None, None, None), (160, 60, None, None, None)]
+    casos = [(175, 78, 100, 86, 98), (165, 55, None, None, None), (175, 110, None, None, None), (160, 60, None, None, None),
+             (175, 130, None, None, None), (210, 180, None, None, None)]
     for altura, peso, pecho, cintura, cadera in casos:
         objetivos, _ = cm.estimar_contornos(altura, peso, "media", pecho, cintura, cadera)
         valores, escala = resolver(tabla, altura, peso, objetivos)
@@ -434,6 +467,9 @@ def exportar(objeto, ruta, *, texturas):
         export_normals=True,
         export_texcoords=texturas,
         export_yup=True,
+        # Los relieves van en JPEG: el de la polera y el polerón mide 2048 px.
+        export_image_format="JPEG" if texturas else "AUTO",
+        export_image_quality=88,
     )
 
 
@@ -455,6 +491,10 @@ def main():
             conjunto, parte = por_sexo[sexo]
             objeto_ropa, posiciones = ropas[conjunto]
             prenda = preparar_prenda(objeto_ropa, posiciones, f"{tipo}-{sexo}", conjunto, parte, alto)
+            # Polera y polerón: tejido, cuello, dobladillos y costuras en el relieve, y bordes con
+            # canto y tela vuelta en la geometría (ver confeccion.py).
+            if tipo in confeccion.TERMINACIONES:
+                confeccion.confeccionar(prenda, tipo, os.path.join(RECURSOS, conjunto, f"{conjunto}_normal.png"), prenda.data.materials[0])
             # La piel bajo la prenda se oculta en la tienda, como hace MakeHuman con su ropa. La
             # lista del conjunto cubre arriba y abajo: se toma solo la de esta parte.
             ocultos_mh = vertices_ocultos(conjunto)

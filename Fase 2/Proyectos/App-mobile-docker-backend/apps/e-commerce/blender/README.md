@@ -6,6 +6,7 @@ Scripts que generan los cuerpos realistas del probador 3D (masculino y femenino)
 | Script | Qué hace |
 | --- | --- |
 | `cuerpo_mpfb.py` | Genera un cuerpo con una altura, un peso y (opcionales) contornos de pecho, cintura y cadera. Sirve para revisar cómo se ve un cuerpo: deja un render y, si se pide, un `.glb`. |
+| `confeccion.py` | Detalles de confección de la polera y el polerón, en el modelo: tejido de punto, cuello acanalado, dobladillos con doble costura y pespuntes en el mapa de relieve, y cantos redondeados con la tela vuelta hacia adentro en la geometría. Lo usa `exportar_probador.py`. |
 | `exportar_probador.py` | Exporta lo que usa la tienda: para cada sexo, el cuerpo y cada prenda (polera, pantalón, polerón, chaqueta) con sus deformaciones (altura, peso, pecho, cintura, cadera), y un JSON con las tablas de calibración. |
 
 ## Requisitos
