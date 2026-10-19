@@ -15,6 +15,14 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: true,
   },
+  plugins: {
+    // La app no se dibuja detrás de la barra de estado ni de la de navegación (index.html no
+    // pide `viewport-fit=cover`): Android le deja ese espacio y ningún botón queda tapado.
+    SystemBars: {
+      insetsHandling: 'native',
+      initialViewportFitValueHint: 'contain',
+    },
+  },
 };
 
 export default config;
