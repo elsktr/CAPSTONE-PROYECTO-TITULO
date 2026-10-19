@@ -19,6 +19,13 @@ describe('normalizarDireccion', () => {
     expect(normalizarDireccion('https://api.tienda.cl/api/v1/salud')).toBe('https://api.tienda.cl');
   });
 
+  it('con solo la IP usa el puerto de la API', () => {
+    expect(normalizarDireccion('192.168.43.10')).toBe('http://192.168.43.10:3000');
+    expect(normalizarDireccion('192.168.43.10:8000')).toBe('http://192.168.43.10:8000');
+    // Con el protocolo escrito se respeta tal cual: puede ser un servidor publicado en el puerto 80 o 443.
+    expect(normalizarDireccion('https://api.tienda.cl')).toBe('https://api.tienda.cl');
+  });
+
   it('rechaza un texto vacío o que no es una dirección', () => {
     expect(normalizarDireccion('   ')).toBeNull();
     expect(normalizarDireccion('http://')).toBeNull();

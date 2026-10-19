@@ -28,46 +28,51 @@ const FORMATO_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             <p role="status">{{ aviso }}</p>
           </ion-text>
         }
-        <form (submit)="$event.preventDefault(); ingresar()">
-          <ion-input
-            class="campo"
-            fill="outline"
-            label="Correo"
-            labelPlacement="floating"
-            type="email"
-            autocomplete="username"
-            [value]="email()"
-            [errorText]="errorEmail() ?? ''"
-            [class.ion-invalid]="errorEmail() !== null"
-            [class.ion-touched]="errorEmail() !== null"
-            (ionInput)="email.set(valor($event))"
-          ></ion-input>
-          <ion-input
-            class="campo"
-            fill="outline"
-            label="Contraseña"
-            labelPlacement="floating"
-            type="password"
-            autocomplete="current-password"
-            [value]="password()"
-            [errorText]="errorPassword() ?? ''"
-            [class.ion-invalid]="errorPassword() !== null"
-            [class.ion-touched]="errorPassword() !== null"
-            (ionInput)="password.set(valor($event))"
-          >
-            <ion-input-password-toggle slot="end" color="medium"></ion-input-password-toggle>
-          </ion-input>
-          @if (error(); as mensaje) {
-            <ion-text color="danger">
-              <p role="alert">{{ mensaje }}</p>
-            </ion-text>
-          }
-          <ion-button type="submit" expand="block" [disabled]="enviando()">
-            {{ enviando() ? 'Ingresando…' : 'Iniciar sesión' }}
-          </ion-button>
-        </form>
-        @if (servidor.configurable) {
+        @if (servidor.sinServidor()) {
+          <!-- Sin servidor no hay a dónde enviar el inicio de sesión: primero se pide la IP. -->
           <app-conexion></app-conexion>
+        } @else {
+          <form (submit)="$event.preventDefault(); ingresar()">
+            <ion-input
+              class="campo"
+              fill="outline"
+              label="Correo"
+              labelPlacement="floating"
+              type="email"
+              autocomplete="username"
+              [value]="email()"
+              [errorText]="errorEmail() ?? ''"
+              [class.ion-invalid]="errorEmail() !== null"
+              [class.ion-touched]="errorEmail() !== null"
+              (ionInput)="email.set(valor($event))"
+            ></ion-input>
+            <ion-input
+              class="campo"
+              fill="outline"
+              label="Contraseña"
+              labelPlacement="floating"
+              type="password"
+              autocomplete="current-password"
+              [value]="password()"
+              [errorText]="errorPassword() ?? ''"
+              [class.ion-invalid]="errorPassword() !== null"
+              [class.ion-touched]="errorPassword() !== null"
+              (ionInput)="password.set(valor($event))"
+            >
+              <ion-input-password-toggle slot="end" color="medium"></ion-input-password-toggle>
+            </ion-input>
+            @if (error(); as mensaje) {
+              <ion-text color="danger">
+                <p role="alert">{{ mensaje }}</p>
+              </ion-text>
+            }
+            <ion-button type="submit" expand="block" [disabled]="enviando()">
+              {{ enviando() ? 'Ingresando…' : 'Iniciar sesión' }}
+            </ion-button>
+          </form>
+          @if (servidor.configurable) {
+            <app-conexion></app-conexion>
+          }
         }
         <p class="pie">Inventario único para bodega y sala de ventas</p>
       </div>

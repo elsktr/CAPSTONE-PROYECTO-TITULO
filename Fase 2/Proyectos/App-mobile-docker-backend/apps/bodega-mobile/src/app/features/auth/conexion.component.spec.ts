@@ -87,4 +87,40 @@ describe('ConexionComponent', () => {
     expect(servidor.direccion()).toBe('http://192.168.1.20:3000');
     expect(conexion.abierto()).toBe(false);
   });
+
+  it('sin servidor elegido se abre sola y pide la IP, sin dejar cancelar', async () => {
+    await servidor.guardar({ modoDemo: false, direccion: '' });
+    expect(servidor.sinServidor()).toBe(true);
+
+    await conexion.revisar();
+
+    expect(conexion.abierto()).toBe(true);
+    expect(conexion.modo()).toBe('SERVIDOR');
+    expect(conexion.mensaje()).toContain('Escribe la IP del equipo servidor');
+    expect(servidor.probar).not.toHaveBeenCalled();
+
+    conexion.escribir('192.168.43.10');
+    await conexion.guardar();
+    expect(servidor.direccion()).toBe('http://192.168.43.10:3000');
+    expect(servidor.sinServidor()).toBe(false);
+  });
+
+  it('avisa y vuelve a pedir la IP si el servidor guardado no responde', async () => {
+    await servidor.guardar({ modoDemo: false, direccion: 'http://192.168.100.7:3000' });
+    responde = false;
+
+    await conexion.revisar();
+
+    expect(servidor.probar).toHaveBeenCalledWith('http://192.168.100.7:3000');
+    expect(conexion.abierto()).toBe(true);
+    expect(conexion.mensaje()).toContain('192.168.100.7:3000 no responde');
+  });
+
+  it('con el servidor guardado respondiendo queda cerrada', async () => {
+    await servidor.guardar({ modoDemo: false, direccion: 'http://192.168.100.7:3000' });
+
+    await conexion.revisar();
+
+    expect(conexion.abierto()).toBe(false);
+  });
 });

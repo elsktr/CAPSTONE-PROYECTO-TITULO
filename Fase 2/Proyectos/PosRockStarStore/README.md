@@ -166,21 +166,25 @@ venta y no quedan en la base; los muestra el reporte de la propia máquina.
 
 ## App Android (APK)
 
-El POS también se instala en un teléfono o tablet Android. Con el backend levantado en
-este equipo y el dispositivo en la misma red Wi-Fi:
+El POS también se instala en un teléfono o tablet Android:
 
 ```bash
-npm run apk                                          # servidor: la IP de este equipo, puerto 3000
-npm run apk -- --servidor=http://192.168.1.20:3000   # otra dirección inicial
+npm run apk                                          # la app pide la IP del servidor al abrirse
+npm run apk -- --servidor=http://192.168.1.20:3000   # parte con esa dirección en vez de pedirla
 ```
 
 El APK queda en `apk/rockstar-pos.apk`. Cópialo al dispositivo y ábrelo para instalarlo;
 Android pedirá permitir la instalación desde esa fuente.
 
-- La dirección del servidor es solo la inicial: en el inicio de sesión de la app aparece
-  "Servidor", con "Cambiar" y "Probar conexión", por si el equipo cambia de IP.
-- La máquina de cobro se configura igual que en el navegador, con la IP del equipo y el
-  puerto 8090 (por ejemplo `192.168.1.20:8090`).
+- El equipo con el backend y el dispositivo deben estar en la misma red: el Wi-Fi del
+  local o la zona Wi-Fi de un celular, a la que se conectan el equipo y los teléfonos.
+- Al abrirse, la app pide la IP del equipo servidor (`ipconfig`, "Dirección IPv4" del
+  adaptador Wi-Fi). Basta con la IP: si no se indica puerto, usa el 3000. "Ingresar" queda
+  deshabilitado hasta que el servidor responde.
+- La app recuerda la dirección. Si al abrirla no responde (por ejemplo, porque se cambió
+  de red), lo avisa y vuelve a pedirla. También se cambia con "Cambiar", en el inicio de sesión.
+- Al conectarse, la máquina de cobro pasa a la misma IP con el puerto 8090, salvo que se
+  haya configurado otra a mano en sus ajustes.
 - Requiere JDK 21 y el SDK de Android con la plataforma 36 (`ANDROID_HOME` o
   `android/local.properties`), como la app de bodega. Si el Java del sistema es más
   antiguo, define `JAVA_HOME` con el JDK 21 antes de ejecutar el comando.

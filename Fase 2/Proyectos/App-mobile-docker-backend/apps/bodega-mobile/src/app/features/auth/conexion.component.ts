@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { IonButton, IonIcon, IonInput, IonSegment, IonSegmentButton } from '@ionic/angular';
 import { addIcons } from 'ionicons';
 import { serverOutline } from 'ionicons/icons';
@@ -12,6 +12,9 @@ type Modo = 'SERVIDOR' | 'DEMO';
  * Elección de a qué se conecta la app: al servidor de la tienda o al modo demostración,
  * que funciona sin servidor con datos de ejemplo. Vive en la pantalla de inicio de sesión
  * porque cambiar de servidor solo tiene sentido sin una sesión abierta.
+ *
+ * Se abre sola cuando la app no tiene servidor o el guardado no responde: la IP del equipo
+ * servidor cambia con la red (el Wi-Fi del local o la zona Wi-Fi de un celular).
  */
 @Component({
   selector: 'app-conexion',
@@ -33,15 +36,18 @@ type Modo = 'SERVIDOR' | 'DEMO';
           <ion-input
             class="direccion"
             fill="outline"
-            label="Dirección del servidor"
+            label="IP del servidor"
             labelPlacement="stacked"
-            placeholder="http://192.168.1.20:3000"
+            placeholder="192.168.43.10"
             inputmode="url"
             autocapitalize="off"
             [value]="direccion()"
             (ionInput)="escribir(valor($event))"
           ></ion-input>
-          <p class="rs-ayuda">El teléfono y el servidor deben estar en la misma red Wi-Fi.</p>
+          <p class="rs-ayuda">
+            La IP del equipo donde corre el sistema (con <code>:puerto</code> si no es el 3000). El teléfono y ese
+            equipo deben estar en la misma red: el Wi-Fi del local o la zona Wi-Fi de un celular.
+          </p>
         } @else {
           <p class="rs-ayuda">Funciona sin servidor, con datos de ejemplo que se reinician al cerrar la app.</p>
         }
@@ -55,7 +61,9 @@ type Modo = 'SERVIDOR' | 'DEMO';
             </ion-button>
           }
           <ion-button [disabled]="ocupado()" (click)="guardar()">Guardar</ion-button>
-          <ion-button fill="clear" color="medium" [disabled]="ocupado()" (click)="abierto.set(false)">Cancelar</ion-button>
+          @if (!servidor.sinServidor()) {
+            <ion-button fill="clear" color="medium" [disabled]="ocupado()" (click)="abierto.set(false)">Cancelar</ion-button>
+          }
         </div>
       </div>
     }
@@ -101,8 +109,8 @@ type Modo = 'SERVIDOR' | 'DEMO';
     }
   `,
 })
-export class ConexionComponent {
-  private readonly servidor = inject(ServidorService);
+export class ConexionComponent implements OnInit {
+  protected readonly servidor = inject(ServidorService);
 
   readonly abierto = signal(false);
   readonly modo = signal<Modo>('SERVIDOR');
@@ -123,6 +131,30 @@ export class ConexionComponent {
 
   constructor() {
     addIcons({ serverOutline });
+  }
+
+  ngOnInit(): void {
+    void this.revisar();
+  }
+
+  /** Pide la IP si la app no tiene servidor, y comprueba que el guardado siga respondiendo. */
+  async revisar(): Promise<void> {
+    if (!this.servidor.configurable || this.servidor.modoDemo()) {
+      return;
+    }
+    if (this.servidor.sinServidor()) {
+      this.abrir();
+      this.informar('Escribe la IP del equipo servidor para conectarte.', false);
+      return;
+    }
+    const direccion = this.servidor.direccion();
+    if (!(await this.servidor.probar(direccion))) {
+      this.abrir();
+      this.informar(
+        `El servidor ${direccion.replace(/^https?:\/\//, '')} no responde. Si cambiaste de red, escribe la IP actual del equipo servidor.`,
+        false,
+      );
+    }
   }
 
   abrir(): void {
@@ -178,7 +210,7 @@ export class ConexionComponent {
   private direccionValida(): string | null {
     const direccion = normalizarDireccion(this.direccion());
     if (direccion === null) {
-      this.informar('Escribe la dirección del servidor, por ejemplo http://192.168.1.20:3000.', false);
+      this.informar('Escribe la dirección del servidor, por ejemplo 192.168.43.10 o http://192.168.1.20:3000.', false);
       return null;
     }
     this.direccion.set(direccion);

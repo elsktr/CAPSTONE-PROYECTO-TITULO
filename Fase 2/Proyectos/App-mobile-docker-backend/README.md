@@ -180,15 +180,16 @@ El APK queda en `apps/bodega-mobile/apk/rockstar-bodega.apk`. Cópialo al teléf
 Para que la app instalada funcione contra el backend:
 
 1. Los contenedores deben estar corriendo en el equipo (`docker compose up -d`).
-2. El teléfono debe estar en la misma red Wi-Fi que el equipo.
-3. La app sale configurada con la dirección que el equipo tenía al compilar. Si cambió, pulsa "Servidor" bajo el botón de inicio de sesión y escribe la nueva, por ejemplo `http://192.168.1.20:3000`. La dirección del equipo se ve con `ipconfig`, en "Dirección IPv4".
+2. El teléfono debe estar en la misma red que el equipo: el Wi-Fi del local o la zona Wi-Fi de un celular, a la que se conectan el equipo y los teléfonos.
+3. Al abrirse, la app pide la IP del equipo servidor. Basta con la IP, por ejemplo `192.168.43.10`: si no se indica puerto, usa el 3000. La IP del equipo se ve con `ipconfig`, en "Dirección IPv4" del adaptador Wi-Fi.
+4. La app recuerda la dirección. Si al abrirla no responde (por ejemplo, porque el equipo se conectó a otra red), lo avisa y vuelve a pedirla. También se puede cambiar con "Servidor", bajo el botón de inicio de sesión.
 
 Sin servidor a mano, la misma pantalla permite pasar a "Demostración", que funciona sola con datos de ejemplo.
 
 Otras formas de compilar:
 
 ```
-npm run apk -- --servidor=http://192.168.1.20:3000   # otra dirección inicial
+npm run apk -- --servidor=http://192.168.1.20:3000   # parte con esa dirección en vez de pedirla
 npm run apk -- --demo                                 # arranca en modo demostración
 ```
 

@@ -1,13 +1,13 @@
 // Genera el APK del POS.
 //
-//   npm run apk                                  servidor: este equipo, en el puerto 3000
-//   npm run apk -- --servidor=http://10.0.0.5:3000
+//   npm run apk                                      la app pide la IP del servidor al abrirse
+//   npm run apk -- --servidor=http://10.0.0.5:3000   parte con esa dirección
 //
-// La dirección elegida es solo el valor inicial: en la app se puede cambiar desde el
-// inicio de sesión. Requiere un JDK 21 y el SDK de Android (ver README).
+// En un teléfono, la IP del equipo servidor cambia con la red (la del local o la zona Wi-Fi
+// de un celular), por eso por defecto no se fija al compilar: la app la pide, la recuerda y
+// la vuelve a pedir si deja de responder. Requiere un JDK 21 y el SDK de Android (ver README).
 
 import { spawnSync } from 'node:child_process';
-import { createSocket } from 'node:dgram';
 import { copyFileSync, mkdirSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -16,20 +16,6 @@ import { fileURLToPath } from 'node:url';
 const RAIZ = fileURLToPath(new URL('..', import.meta.url));
 const requerir = createRequire(import.meta.url);
 const binario = (paquete, ruta) => join(dirname(requerir.resolve(`${paquete}/package.json`)), ruta);
-
-/** Dirección de este equipo en la red local: la de la interfaz por la que sale a internet. */
-function ipLocal() {
-  return new Promise((resolver) => {
-    const socket = createSocket('udp4');
-    // Conectar un socket UDP no envía nada; solo hace que el sistema elija la interfaz de salida.
-    socket.connect(53, '8.8.8.8', () => {
-      const { address } = socket.address();
-      socket.close();
-      resolver(address);
-    });
-    socket.on('error', () => resolver(null));
-  });
-}
 
 function ejecutar(titulo, comando, argumentos, opciones = {}) {
   console.log(`\n== ${titulo} ==`);
@@ -41,15 +27,11 @@ function ejecutar(titulo, comando, argumentos, opciones = {}) {
 }
 
 const pedido = process.argv.slice(2).find((argumento) => argumento.startsWith('--servidor='))?.slice('--servidor='.length);
-const ip = pedido ? null : await ipLocal();
-const servidor = (pedido ?? (ip ? `http://${ip}:3000` : '')).replace(/\/+$/, '');
-if (!servidor) {
-  console.error('No se pudo saber la IP de este equipo. Indíquela con --servidor=http://IP:3000');
-  process.exit(1);
-}
-console.log(`Servidor inicial de la app: ${servidor}`);
+const servidor = (pedido ?? '').replace(/\/+$/, '');
+console.log(servidor ? `Servidor inicial de la app: ${servidor}` : 'La app pedirá la IP del servidor al abrirse.');
 
-const env = { ...process.env, VITE_API_URL: `${servidor}/api/v1` };
+// Vacía a propósito si no se indicó: tapa la de un `.env` de desarrollo, que en un teléfono no sirve.
+const env = { ...process.env, VITE_API_URL: servidor ? `${servidor}/api/v1` : '' };
 ejecutar('Revisando tipos', process.execPath, [binario('typescript', 'bin/tsc')], { env });
 ejecutar('Compilando la app', process.execPath, [binario('vite', 'bin/vite.js'), 'build'], { env });
 ejecutar('Copiando la app al proyecto Android', process.execPath, [binario('@capacitor/cli', 'bin/capacitor'), 'sync', 'android']);

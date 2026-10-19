@@ -37,7 +37,8 @@
             "scripts": [],
             "browser": "src/main.ts",
             "define": {
-              "SERVIDOR_API": "''"
+              "SERVIDOR_API": "''",
+              "MODO_DEMO": "false"
             }
           },
           "configurations": {

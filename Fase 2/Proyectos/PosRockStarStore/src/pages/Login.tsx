@@ -77,12 +77,14 @@ const Login: React.FC = () => {
   const [tocado, setTocado] = useState({ email: false, password: false });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // En el teléfono, el inicio de sesión espera a tener un servidor que responda.
+  const [conectado, setConectado] = useState(!esAppInstalada);
 
   const emailValido = useMemo(() => EMAIL_RE.test(email.trim()), [email]);
   const fortaleza = useMemo(() => medirFortaleza(password), [password]);
   const fortalezaMeta = FORTALEZA_META[fortaleza];
   const errorInfo = useMemo(() => (error ? clasificarError(error) : null), [error]);
-  const puedeEnviar = emailValido && password.length > 0 && !loading;
+  const puedeEnviar = emailValido && password.length > 0 && !loading && conectado;
 
   // Health-check del backend al mostrar el login (no bloquea la UI).
   useEffect(() => {
@@ -126,7 +128,7 @@ const Login: React.FC = () => {
             <p>Acceso vendedor</p>
           </div>
           {/* En el teléfono no hay mismo origen: se muestra a qué equipo se conecta. */}
-          {esAppInstalada && <ServidorApp />}
+          {esAppInstalada && <ServidorApp onConectado={setConectado} />}
           <form onSubmit={handleSubmit} noValidate>
             <IonItem
               className={

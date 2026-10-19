@@ -1,10 +1,12 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, computed, signal } from '@angular/core';
 import { Preferences } from '@capacitor/preferences';
 
 import { environment } from '../../../environments/environment';
 
 const CLAVE = 'servidor';
 const ESPERA_PRUEBA_MS = 6000;
+/** Puerto de la API cuando se escribe solo la IP del equipo. */
+export const PUERTO_API = 3000;
 
 /** A qué se conecta la app: a un servidor real o al backend simulado de demostración. */
 export interface Conexion {
@@ -16,6 +18,7 @@ export interface Conexion {
 /**
  * Deja una dirección escrita a mano en la forma `http://equipo:puerto`: agrega el
  * protocolo si falta y quita la barra final y la ruta de la API si se pegaron completas.
+ * Con solo la IP o el nombre del equipo, sin protocolo ni puerto, usa el puerto de la API.
  * Devuelve `null` si no es una dirección válida.
  */
 export function normalizarDireccion(texto: string): string | null {
@@ -24,7 +27,11 @@ export function normalizarDireccion(texto: string): string | null {
     return null;
   }
   try {
-    const url = new URL(/^https?:\/\//i.test(limpio) ? limpio : `http://${limpio}`);
+    const conProtocolo = /^https?:\/\//i.test(limpio);
+    const url = new URL(conProtocolo ? limpio : `http://${limpio}`);
+    if (!conProtocolo && url.port === '') {
+      url.port = String(PUERTO_API);
+    }
     return url.hostname === '' ? null : url.origin;
   } catch {
     return null;
@@ -42,6 +49,8 @@ export class ServidorService {
 
   readonly modoDemo = signal(environment.useMockApi);
   readonly direccion = signal(environment.servidorPorDefecto);
+  /** La app instalada aún no sabe a qué servidor conectarse: hay que pedirle la IP. */
+  readonly sinServidor = computed(() => this.configurable && !this.modoDemo() && this.direccion() === '');
 
   /** Recupera la conexión guardada en el dispositivo al abrir la app. */
   async restaurar(): Promise<void> {

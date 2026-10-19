@@ -1,14 +1,14 @@
 // Genera el APK de la app de bodega.
 //
-//   npm run apk                                  servidor: este equipo, en el puerto 3000
-//   npm run apk -- --servidor=http://10.0.0.5:3000
-//   npm run apk -- --demo                        sin servidor: arranca en modo demostración
+//   npm run apk                                      la app pide la IP del servidor al abrirse
+//   npm run apk -- --servidor=http://10.0.0.5:3000   parte con esa dirección
+//   npm run apk -- --demo                            sin servidor: arranca en modo demostración
 //
-// La dirección elegida es solo el valor inicial: en la app se puede cambiar desde la
-// pantalla de inicio de sesión. Requiere un JDK 21 y el SDK de Android (ver README).
+// En un teléfono, la IP del equipo servidor cambia con la red (la del local o la zona Wi-Fi
+// de un celular), por eso por defecto no se fija al compilar: la app la pide, la recuerda y
+// la vuelve a pedir si deja de responder. Requiere un JDK 21 y el SDK de Android (ver README).
 
 import { spawnSync } from 'node:child_process';
-import { createSocket } from 'node:dgram';
 import { copyFileSync, mkdirSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -17,20 +17,6 @@ import { fileURLToPath } from 'node:url';
 const RAIZ = fileURLToPath(new URL('..', import.meta.url));
 const requerir = createRequire(import.meta.url);
 const binario = (paquete, ruta) => join(dirname(requerir.resolve(`${paquete}/package.json`)), ruta);
-
-/** Dirección de este equipo en la red local: la de la interfaz por la que sale a internet. */
-function ipLocal() {
-  return new Promise((resolver) => {
-    const socket = createSocket('udp4');
-    // Conectar un socket UDP no envía nada; solo hace que el sistema elija la interfaz de salida.
-    socket.connect(53, '8.8.8.8', () => {
-      const { address } = socket.address();
-      socket.close();
-      resolver(address);
-    });
-    socket.on('error', () => resolver(null));
-  });
-}
 
 function ejecutar(titulo, comando, argumentos, opciones = {}) {
   console.log(`\n== ${titulo} ==`);
@@ -43,18 +29,21 @@ function ejecutar(titulo, comando, argumentos, opciones = {}) {
 
 const argumentos = process.argv.slice(2);
 const pedido = argumentos.find((argumento) => argumento.startsWith('--servidor='))?.slice('--servidor='.length);
-let servidor = '';
-if (!argumentos.includes('--demo')) {
-  const ip = pedido ? null : await ipLocal();
-  servidor = (pedido ?? (ip ? `http://${ip}:3000` : '')).replace(/\/+$/, '');
+const demo = argumentos.includes('--demo');
+const servidor = demo ? '' : (pedido ?? '').replace(/\/+$/, '');
+if (demo) {
+  console.log('La app arrancará en modo demostración, sin servidor.');
+} else {
+  console.log(servidor ? `Servidor inicial de la app: ${servidor}` : 'La app pedirá la IP del servidor al abrirse.');
 }
-console.log(servidor ? `Servidor inicial de la app: ${servidor}` : 'La app arrancará en modo demostración, sin servidor.');
 
 ejecutar('Compilando la app', process.execPath, [
   binario('@angular/cli', 'bin/ng.js'),
   'build',
   '--define',
   `SERVIDOR_API=${JSON.stringify(servidor)}`,
+  '--define',
+  `MODO_DEMO=${demo}`,
 ]);
 ejecutar('Copiando la app al proyecto Android', process.execPath, [binario('@capacitor/cli', 'bin/capacitor'), 'sync', 'android']);
 
