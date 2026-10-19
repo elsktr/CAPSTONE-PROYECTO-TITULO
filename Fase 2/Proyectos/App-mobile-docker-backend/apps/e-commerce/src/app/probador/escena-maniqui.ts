@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import type { Complexion, MedidasCuerpo, TipoPrenda } from '../data/probador';
+import { medidasDeTalla, recomendarTalla } from '../data/probador';
 import { EsqueletoAvatar, SeccionTorso, alcanceGluteos, crearCuerpo, crearPolera } from './avatar';
 import {
   Cobertura,
@@ -439,6 +440,22 @@ function liberar(objeto: THREE.Object3D): void {
   });
 }
 
+/** Colores neutros de la prenda que acompaña a la que se prueba. */
+const COLOR_PANTALON = '#2b3346';
+const COLOR_POLERA = '#8e9097';
+
+/**
+ * Prenda que acompaña a la que se prueba, para no mostrar el cuerpo a medio vestir: un pantalón
+ * bajo las prendas de arriba y el cinturón, y una polera sobre el pantalón. Va en la talla que le
+ * corresponde al cuerpo y en un color neutro.
+ */
+function complementoDe(prenda: PrendaEnEscena, cuerpo: MedidasCuerpo): PrendaEnEscena | null {
+  const tipo: TipoPrenda = prenda.tipo === 'pantalon' ? 'polera' : 'pantalon';
+  const medidas = medidasDeTalla(tipo, recomendarTalla(cuerpo, tipo));
+  if (!medidas) return null;
+  return { tipo, contorno: medidas.contornoPrenda, largo: medidas.largo, color: tipo === 'pantalon' ? COLOR_PANTALON : COLOR_POLERA };
+}
+
 export class EscenaManiqui {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly escena = new THREE.Scene();
@@ -519,27 +536,48 @@ export class EscenaManiqui {
       .then(async (modelo) => {
         if (!prenda) return vigente() && this.dibujarReal(modelo, cuerpo, null, null);
         if (!tieneModeloReal(modelo, prenda.tipo)) return vigente() && this.dibujarManiqui(cuerpo, prenda);
-        const mallas = prenda.tipo === 'cinturon' ? null : await cargarPrendaReal(modelo, prenda.tipo);
+        const complemento = complementoDe(prenda, cuerpo);
+        const [mallas, mallasComplemento] = await Promise.all([
+          prenda.tipo === 'cinturon' ? null : cargarPrendaReal(modelo, prenda.tipo),
+          complemento && tieneModeloReal(modelo, complemento.tipo) ? cargarPrendaReal(modelo, complemento.tipo).catch(() => null) : null,
+        ]);
         // Si mientras cargaba llegaron otras medidas u otra talla, se dibujan esas.
-        return vigente() && this.dibujarReal(modelo, cuerpo, prenda, mallas);
+        return vigente() && this.dibujarReal(modelo, cuerpo, prenda, mallas, complemento && mallasComplemento ? { prenda: complemento, mallas: mallasComplemento } : null);
       })
       .catch(() => vigente() && this.dibujarManiqui(cuerpo, prenda));
   }
 
-  private dibujarReal(modelo: ModeloReal, cuerpo: MedidasCuerpo, prenda: PrendaEnEscena | null, mallas: Parameters<typeof crearPrendaReal>[1] | null): void {
+  private dibujarReal(
+    modelo: ModeloReal,
+    cuerpo: MedidasCuerpo,
+    prenda: PrendaEnEscena | null,
+    mallas: Parameters<typeof crearPrendaReal>[1] | null,
+    complemento: { prenda: PrendaEnEscena; mallas: Parameters<typeof crearPrendaReal>[1] } | null = null,
+  ): void {
     const posiciones = posicionesCuerpo(modelo, cuerpo);
-    let cobertura: Cobertura | undefined;
-    let ropa: THREE.Object3D | null = null;
-    if (prenda?.tipo === 'cinturon') {
-      ropa = crearCinturonReal(posiciones, cuerpo, prenda.color);
-    } else if (prenda && mallas) {
-      const resultado = crearPrendaReal(modelo, mallas, cuerpo, { tipo: prenda.tipo, contorno: prenda.contorno, largo: prenda.largo, color: prenda.color });
-      ropa = resultado.grupo;
-      cobertura = resultado.cobertura;
-    }
-    // La piel bajo la prenda se oculta según dónde quede la prenda: el cuerpo depende de la talla.
-    const talla = prenda ? `${prenda.tipo}:${prenda.contorno}:${prenda.largo}` : '';
-    this.cambiarFigura(`real:${JSON.stringify(cuerpo)}:${talla}`, () => crearCuerpoReal(modelo, posiciones, cobertura), () => ropa);
+    const coberturas: Cobertura[] = [];
+    const ropa = new THREE.Group();
+    const puestas: { abajo: boolean; grupo: THREE.Group }[] = [];
+    const vestir = (p: PrendaEnEscena, m: Parameters<typeof crearPrendaReal>[1]) => {
+      const abajo = p.tipo === 'pantalon';
+      // La parte de arriba va por fuera del pantalón: se saca de él además del cuerpo.
+      const debajo = abajo ? [] : puestas.filter((x) => x.abajo).map((x) => x.grupo);
+      const resultado = crearPrendaReal(modelo, m, cuerpo, { tipo: p.tipo, contorno: p.contorno, largo: p.largo, color: p.color }, posiciones, debajo);
+      ropa.add(resultado.grupo);
+      puestas.push({ abajo, grupo: resultado.grupo });
+      coberturas.push(resultado.cobertura);
+    };
+    // Primero el pantalón (va debajo), luego la parte de arriba.
+    const lista = [complemento ? { prenda: complemento.prenda, mallas: complemento.mallas } : null, prenda && mallas && prenda.tipo !== 'cinturon' ? { prenda, mallas } : null]
+      .filter((x): x is { prenda: PrendaEnEscena; mallas: Parameters<typeof crearPrendaReal>[1] } => x !== null)
+      .sort((a, b) => Number(b.prenda.tipo === 'pantalon') - Number(a.prenda.tipo === 'pantalon'));
+    for (const { prenda: p, mallas: m } of lista) vestir(p, m);
+    if (prenda?.tipo === 'cinturon') ropa.add(crearCinturonReal(posiciones, cuerpo, prenda.color));
+    // La piel bajo las prendas se oculta según dónde queden: el cuerpo depende de las tallas.
+    const talla = [prenda, complemento?.prenda].map((p) => (p ? `${p.tipo}:${p.contorno}:${p.largo}` : '')).join('|');
+    this.cambiarFigura(`real:${JSON.stringify(cuerpo)}:${talla}`, () => crearCuerpoReal(modelo, posiciones, coberturas), () =>
+      ropa.children.length ? ropa : null,
+    );
     this.encuadrar(cuerpo.altura / 100);
   }
 

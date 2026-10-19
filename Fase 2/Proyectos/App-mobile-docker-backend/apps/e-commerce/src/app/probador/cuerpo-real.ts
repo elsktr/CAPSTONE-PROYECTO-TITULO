@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-import { MedidasCuerpo, Sexo, TipoPrenda, medidasDeTalla } from '../data/probador';
+import { MedidasCuerpo, Sexo, TipoPrenda } from '../data/probador';
 
 /**
  * Cuerpo realista del probador y sus prendas: el cuerpo de MakeHuman y ropa de conjuntos de
@@ -18,7 +18,7 @@ import { MedidasCuerpo, Sexo, TipoPrenda, medidasDeTalla } from '../data/probado
  */
 
 const CONTORNOS = ['pecho', 'cintura', 'cadera'] as const;
-type Parametro = 'altura' | 'peso' | (typeof CONTORNOS)[number];
+type Parametro = 'altura' | 'peso' | 'volumen' | (typeof CONTORNOS)[number];
 
 interface Fila {
   valor: number;
@@ -49,7 +49,8 @@ interface PrendaCalibrada {
 interface Calibracion {
   sexo: Sexo;
   formas: string[];
-  tablas: Record<Parametro, Fila[]>;
+  /** `volumen` falta en los modelos anteriores a esa variante. */
+  tablas: Record<Exclude<Parametro, 'volumen'>, Fila[]> & { volumen?: Fila[] };
   prendas: Partial<Record<TipoPrenda, PrendaCalibrada>>;
 }
 
@@ -71,8 +72,15 @@ export interface ModeloReal {
 }
 
 const RUTA = 'assets/probador';
-/** La prenda medida en plano cuelga más corta de lo que mide (igual que en `escena-maniqui.ts`). */
-const CAIDA = 0.82;
+/**
+ * Puesta, una prenda de arriba mide en vertical, del hombro a la basta, un 90 % de su largo
+ * medido en plano: la tela se reparte sobre el hombro y el pecho.
+ */
+const CAIDA_PUESTA = 0.9;
+/** Holgura máxima de la pretina de un pantalón sobre la cintura, en centímetros (como si llevara cinturón). */
+const HOLGURA_PRETINA = 4;
+/** Holgura máxima con que se dibuja la cadera de un pantalón, en centímetros. */
+const HOLGURA_MAXIMA_DIBUJADA = 14;
 const modelos = new Map<Sexo, Promise<ModeloReal>>();
 const prendas = new Map<string, Promise<MallaDeformable[]>>();
 
@@ -137,6 +145,7 @@ export function cargarPrendaReal(modelo: ModeloReal, tipo: TipoPrenda): Promise<
   return recordar(prendas, `${modelo.sexo}:${tipo}`, () => cargarMallas(`${RUTA}/${prenda.archivo}`));
 }
 
+
 function interpolar(filas: Fila[], campo: keyof Fila, valor: number): number {
   for (let i = 0; i < filas.length - 1; i++) {
     const a = filas[i]!;
@@ -166,12 +175,15 @@ function invertir(filas: { valor: number; medida: number }[], objetivo: number):
 export function resolverCuerpo(calibracion: Calibracion, cuerpo: MedidasCuerpo): { valores: Record<Parametro, number>; escala: number } {
   const { tablas } = calibracion;
   const peso = Math.min(Math.max((cuerpo.imc - 17) / 14, 0), 1) * 2 - 1;
+  // Pasado el tope del peso de MakeHuman (IMC 31), el volumen engrosa brazos, piernas y cuello.
+  const volumen = tablas.volumen ? Math.min(Math.max((cuerpo.imc - 31) / 12, 0), 1) : 0;
   const altura = invertir(tablas.altura.map((f) => ({ valor: f.valor, medida: f.altura })), cuerpo.altura);
   const escala = cuerpo.altura / interpolar(tablas.altura, 'altura', altura);
-  const valores = { altura, peso } as Record<Parametro, number>;
+  const valores = { altura, peso, volumen } as Record<Parametro, number>;
   for (const m of CONTORNOS) {
     const base = interpolar(tablas[m], m, 0);
-    const sinControl = base + (interpolar(tablas.altura, m, altura) - base) + (interpolar(tablas.peso, m, peso) - base);
+    const porVolumen = tablas.volumen ? interpolar(tablas.volumen, m, volumen) - base : 0;
+    const sinControl = base + (interpolar(tablas.altura, m, altura) - base) + (interpolar(tablas.peso, m, peso) - base) + porVolumen;
     const diferencia = cuerpo[m] / escala - sinControl;
     valores[m] = invertir(tablas[m].map((f) => ({ valor: f.valor, medida: f[m] - base })), diferencia);
   }
@@ -214,12 +226,14 @@ export interface Cobertura {
 }
 
 /** Malla del cuerpo deformado, con material de maniquí y sin la piel que cubre la prenda. */
-export function crearCuerpoReal(modelo: ModeloReal, posiciones: Float32Array, cobertura?: Cobertura): THREE.Mesh {
+export function crearCuerpoReal(modelo: ModeloReal, posiciones: Float32Array, coberturas: Cobertura[] = []): THREE.Mesh {
   const resultado = geometria(modelo.cuerpo, posiciones);
   const indices = resultado.getIndex();
-  if (cobertura && indices) {
-    const ocultos = new Set(cobertura.ocultos);
-    const oculto = (v: number) => ocultos.has(v) && cobertura.cubre(posiciones[v * 3]!, posiciones[v * 3 + 1]!, posiciones[v * 3 + 2]!);
+  if (coberturas.length && indices) {
+    // La piel se oculta si la cubre cualquiera de las prendas puestas.
+    const conjuntos = coberturas.map((c) => ({ ocultos: new Set(c.ocultos), cubre: c.cubre }));
+    const oculto = (v: number) =>
+      conjuntos.some((c) => c.ocultos.has(v) && c.cubre(posiciones[v * 3]!, posiciones[v * 3 + 1]!, posiciones[v * 3 + 2]!));
     const visibles: number[] = [];
     for (let t = 0; t < indices.count; t += 3) {
       const a = indices.getX(t);
@@ -244,7 +258,7 @@ export interface TallaPrenda {
 }
 
 /** Material de cada tipo de prenda, con el relieve de tela del modelo y el color del producto. */
-function materialPrenda(tipo: TipoPrenda, original: THREE.MeshStandardMaterial | null, color: THREE.Color): THREE.MeshPhysicalMaterial {
+function materialPrenda(tipo: TipoPrenda, malla: MallaDeformable, color: THREE.Color): THREE.MeshPhysicalMaterial {
   const cuero = tipo === 'chaqueta';
   return new THREE.MeshPhysicalMaterial({
     color,
@@ -255,7 +269,7 @@ function materialPrenda(tipo: TipoPrenda, original: THREE.MeshStandardMaterial |
     sheen: cuero ? 0 : 0.3,
     sheenRoughness: 0.9,
     sheenColor: color.clone().lerp(new THREE.Color('#ffffff'), 0.25),
-    normalMap: original?.normalMap ?? null,
+    normalMap: malla.material?.normalMap ?? null,
     normalScale: new THREE.Vector2(0.8, 0.8),
     side: THREE.DoubleSide,
   });
@@ -270,27 +284,109 @@ export function crearPrendaReal(
   mallas: MallaDeformable[],
   cuerpo: MedidasCuerpo,
   talla: TallaPrenda,
+  posicionesDelCuerpo?: Float32Array,
+  /** Prendas ya puestas debajo (el pantalón bajo una polera): esta queda por fuera de ellas. */
+  debajo: THREE.Group[] = [],
 ): { grupo: THREE.Group; cobertura: Cobertura } {
   const calibrada = modelo.calibracion.prendas[talla.tipo]!;
   const { valores, escala } = resolverCuerpo(modelo.calibracion, cuerpo);
   const partes = mallas.map((malla) => ({ malla, posiciones: deformar(malla, valores, escala) }));
   const cobertura =
     calibrada.parte === 'arriba'
-      ? ajustarArriba(partes.map((p) => p.posiciones), calibrada, cuerpo, talla, escala)
+      ? ajustarArriba(partes.map((p) => p.posiciones), calibrada, cuerpo, talla, escala, posicionesDelCuerpo)
       : ajustarAbajo(partes.map((p) => p.posiciones), calibrada, cuerpo, talla);
+  // Lo que quede dentro del cuerpo (un abdomen o un brazo más grueso que la tela) sale a la piel.
+  if (posicionesDelCuerpo) sacarDelCuerpo(partes.map((p) => p.posiciones), posicionesDelCuerpo, modelo.cuerpo.indices);
+  for (const otra of debajo) {
+    otra.traverse((hijo) => {
+      if (!(hijo instanceof THREE.Mesh)) return;
+      const geometria = hijo.geometry as THREE.BufferGeometry;
+      sacarDelCuerpo(partes.map((p) => p.posiciones), geometria.getAttribute('position').array as Float32Array, geometria.getIndex(), SEPARACION_CAPAS);
+    });
+  }
 
   const grupo = new THREE.Group();
   for (const { malla, posiciones } of partes) {
     const secundaria = malla.material?.name.startsWith('Secundaria');
     const color = new THREE.Color(secundaria ? '#e9e4da' : talla.color);
-    grupo.add(new THREE.Mesh(geometria(malla, posiciones), materialPrenda(talla.tipo, malla.material, color)));
+    grupo.add(new THREE.Mesh(geometria(malla, posiciones), materialPrenda(talla.tipo, malla, color)));
   }
   return { grupo, cobertura: { ocultos: calibrada.ocultos, cubre: cobertura } };
 }
 
+/** Separación mínima entre la tela y la piel al sacarla del cuerpo, en metros. */
+const SEPARACION_COLISION = 0.006;
+/** Separación entre una prenda y la que lleva debajo, en metros. */
+const SEPARACION_CAPAS = 0.004;
+/** Lado de cada celda de la grilla con que se buscan los vértices del cuerpo, en metros. */
+const CELDA = 0.03;
+
+/**
+ * Colisión de la tela con el cuerpo: cada punto de la prenda que esté dentro del cuerpo (o a menos
+ * de `SEPARACION_COLISION` de la piel) se lleva afuera, a lo largo de la normal de la piel más
+ * cercana. Así ningún trozo de piel atraviesa la tela, sea cual sea la talla o el cuerpo.
+ */
+function sacarDelCuerpo(posiciones: Float32Array[], cuerpo: Float32Array, indices: THREE.BufferAttribute | null, separacion = SEPARACION_COLISION): void {
+  const malla = new THREE.BufferGeometry();
+  malla.setAttribute('position', new THREE.BufferAttribute(cuerpo, 3));
+  if (indices) malla.setIndex(indices);
+  malla.computeVertexNormals();
+  const normales = malla.getAttribute('normal').array as Float32Array;
+
+  const grilla = new Map<string, number[]>();
+  const clave = (x: number, y: number, z: number) => `${Math.floor(x / CELDA)},${Math.floor(y / CELDA)},${Math.floor(z / CELDA)}`;
+  for (let i = 0; i < cuerpo.length; i += 3) {
+    const k = clave(cuerpo[i]!, cuerpo[i + 1]!, cuerpo[i + 2]!);
+    const lista = grilla.get(k);
+    if (lista) lista.push(i);
+    else grilla.set(k, [i]);
+  }
+
+  cadaVertice(posiciones, (p, i) => {
+    const x = p[i]!;
+    const y = p[i + 1]!;
+    const z = p[i + 2]!;
+    const cx = Math.floor(x / CELDA);
+    const cy = Math.floor(y / CELDA);
+    const cz = Math.floor(z / CELDA);
+    let cercano = -1;
+    let distancia = Infinity;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          for (const j of grilla.get(`${cx + dx},${cy + dy},${cz + dz}`) ?? []) {
+            const d = (cuerpo[j]! - x) ** 2 + (cuerpo[j + 1]! - y) ** 2 + (cuerpo[j + 2]! - z) ** 2;
+            if (d < distancia) {
+              distancia = d;
+              cercano = j;
+            }
+          }
+        }
+      }
+    }
+    if (cercano < 0) return;
+    const nx = normales[cercano]!;
+    const ny = normales[cercano + 1]!;
+    const nz = normales[cercano + 2]!;
+    // Altura sobre la piel, medida a lo largo de su normal.
+    const sobre = (x - cuerpo[cercano]!) * nx + (y - cuerpo[cercano + 1]!) * ny + (z - cuerpo[cercano + 2]!) * nz;
+    if (sobre >= separacion) return;
+    // Curva creciente entre media separación y la separación completa: lo que estaba más adentro
+    // sigue más adentro, así las dos capas del dobladillo no se cruzan ni se superponen.
+    const nuevo = separacion * (0.5 + 0.5 * Math.exp((sobre - separacion) / separacion));
+    const empuje = nuevo - sobre;
+    p[i] = x + nx * empuje;
+    p[i + 1] = y + ny * empuje;
+    p[i + 2] = z + nz * empuje;
+  });
+  malla.dispose();
+}
+
 /** Recorre los vértices de todas las partes de una prenda. */
-function cadaVertice(posiciones: Float32Array[], accion: (p: Float32Array, i: number) => void): void {
-  for (const p of posiciones) for (let i = 0; i < p.length; i += 3) accion(p, i);
+function cadaVertice(posiciones: Float32Array[], accion: (p: Float32Array, i: number, parte: number) => void): void {
+  posiciones.forEach((p, parte) => {
+    for (let i = 0; i < p.length; i += 3) accion(p, i, parte);
+  });
 }
 
 /**
@@ -304,6 +400,7 @@ function ajustarArriba(
   cuerpo: MedidasCuerpo,
   talla: TallaPrenda,
   escala: number,
+  posicionesDelCuerpo?: Float32Array,
 ): (x: number, y: number, z: number) => boolean {
   const { ajuste } = calibrada;
   let abajo = Infinity;
@@ -329,31 +426,54 @@ function ajustarArriba(
     }
   });
   centroZ /= enTronco || 1;
-  cadaVertice(posiciones, (p, i) => {
+  // Cuánto es tronco cada vértice (1) o manga (0), según dónde estaba antes de ensancharlo: en una
+  // talla ancha los costados del tronco quedan más afuera que el límite. Donde el cuerpo deja ver
+  // el espacio entre el torso y el brazo, el límite va al medio de ese espacio; más arriba, cerca de
+  // la axila, se usa un ancho fijo.
+  const limiteTronco = posicionesDelCuerpo ? separacionTronco(posicionesDelCuerpo, axila) : () => null;
+  const tronco = posiciones.map((p) => new Float32Array(p.length / 3));
+  cadaVertice(posiciones, (p, i, parte) => {
     const x = p[i]!;
     const y = p[i + 1]!;
     // Pleno bajo el pecho, se desvanece hacia la axila y hacia los costados (donde nacen las mangas).
     const vertical = Math.min(Math.max((axila - y) / (axila - pecho), 0), 1);
-    const lateral = Math.min(Math.max((semiancho * 1.25 - Math.abs(x)) / (semiancho * 0.25), 0), 1);
+    const limite = limiteTronco(y);
+    const lateral =
+      limite === null
+        ? Math.min(Math.max((semiancho * 1.25 - Math.abs(x)) / (semiancho * 0.25), 0), 1)
+        : Math.min(Math.max((limite + TRANSICION_MANGA / 2 - Math.abs(x)) / TRANSICION_MANGA, 0), 1);
+    tronco[parte]![i / 3] = lateral;
     const s = 1 + (factor - 1) * vertical * lateral;
     p[i] = x * s;
     p[i + 2] = centroZ + (p[i + 2]! - centroZ) * s;
   });
 
-  // Largo: bajo el pecho, cada vértice baja (o sube) en proporción a su distancia del pecho. El
-  // modelo corresponde a una talla M.
-  const largoModelo = medidasDeTalla(talla.tipo, 'M')?.largo ?? talla.largo;
-  const alargue = ((talla.largo - largoModelo) * CAIDA * escala) / 100;
-  cadaVertice(posiciones, (p, i) => {
-    const y = p[i + 1]!;
-    if (y < pecho) p[i + 1] = y - alargue * Math.min((pecho - y) / (pecho - abajo), 1);
+  // Largo: la prenda puesta mide, del hombro a la basta, el largo de la talla (medido en plano)
+  // por lo que cae al usarla. Bajo el pecho, cada vértice del tronco baja (o sube) en proporción a
+  // su distancia del pecho; las mangas no se mueven.
+  const pesoTronco = (i: number, parte: number) => tronco[parte]![i / 3]!;
+  let bastaActual = Infinity;
+  cadaVertice(posiciones, (p, i, parte) => {
+    if (pesoTronco(i, parte) === 1) bastaActual = Math.min(bastaActual, p[i + 1]!);
   });
+  if (!Number.isFinite(bastaActual)) bastaActual = abajo;
+  const alargue = (talla.largo * CAIDA_PUESTA) / 100 - (arriba - bastaActual);
+  cadaVertice(posiciones, (p, i, parte) => {
+    const y = p[i + 1]!;
+    if (y < pecho) p[i + 1] = y - alargue * Math.min((pecho - y) / (pecho - bastaActual), 1) * pesoTronco(i, parte);
+  });
+
+  const sectores = 48;
+  const sector = (x: number, z: number) => Math.floor((Math.atan2(x, z - centroZ) / (2 * Math.PI) + 0.5) * sectores) % sectores;
+  // La chaqueta es estructurada y lleva una camisa debajo: no cae como una polera, y hacer caer
+  // ambas capas las cruza.
+  if (posicionesDelCuerpo && talla.tipo !== 'chaqueta') {
+    dejarCaer(posiciones, posicionesDelCuerpo, { pecho, axila, centroZ, semiancho, pesoTronco, sector, sectores });
+  }
 
   // Altura de la basta en cada dirección alrededor del cuerpo: no es pareja (los costados suelen
   // quedar más altos), y la piel solo se oculta donde la prenda de verdad la cubre.
-  const sectores = 48;
   const bastaPorSector = new Float32Array(sectores).fill(Infinity);
-  const sector = (x: number, z: number) => Math.floor((Math.atan2(x, z - centroZ) / (2 * Math.PI) + 0.5) * sectores) % sectores;
   cadaVertice(posiciones, (p, i) => {
     if (p[i + 1]! > pecho) return;
     const s = sector(p[i]!, p[i + 2]!);
@@ -371,6 +491,182 @@ function ajustarArriba(
     // Margen: la basta puede tener un doblez hacia adentro que la hace parecer más baja.
     return y > basta + 0.04;
   };
+}
+
+/** Separación mínima entre la tela y la piel, en metros. */
+const SEPARACION_TELA = 0.008;
+/** Cuánto más allá de su caída puede apoyarse la tela sobre el cuerpo, en metros. */
+const APOYO_MAXIMO = 0.03;
+/** Alto de cada franja con que se mide el cuerpo, en metros. */
+const FRANJA = 0.02;
+
+/** Espacio mínimo entre el torso y el brazo para distinguirlos, en metros. */
+const ESPACIO_BRAZO = 0.025;
+/** Medio ancho mínimo del torso: un espacio más cerca del centro es entre vértices del propio torso. */
+const MEDIO_TORSO_MINIMO = 0.08;
+/** Alto de cada franja con que se busca el espacio entre torso y brazo: más que la distancia entre anillos de la malla. */
+const FRANJA_BRAZO = 0.04;
+/** Ancho de la transición entre tronco y manga en el límite, en metros. */
+const TRANSICION_MANGA = 0.01;
+
+/**
+ * Distancia al centro que separa el torso de los brazos a cada altura bajo la axila: la mitad del
+ * espacio que el cuerpo deja entre ambos. `null` donde no hay espacio (cerca de la axila).
+ */
+function separacionTronco(cuerpo: Float32Array, axila: number): (y: number) => number | null {
+  const porFranja = new Map<number, number[]>();
+  for (let i = 0; i < cuerpo.length; i += 3) {
+    const y = cuerpo[i + 1]!;
+    if (y > axila) continue;
+    const f = Math.floor(y / FRANJA_BRAZO);
+    let lista = porFranja.get(f);
+    if (!lista) porFranja.set(f, (lista = []));
+    lista.push(Math.abs(cuerpo[i]!));
+  }
+  const limites = new Map<number, number>();
+  for (const [f, lista] of porFranja) {
+    lista.sort((a, b) => a - b);
+    for (let k = 1; k < lista.length; k++) {
+      if (lista[k - 1]! >= MEDIO_TORSO_MINIMO && lista[k]! - lista[k - 1]! > ESPACIO_BRAZO) {
+        limites.set(f, (lista[k]! + lista[k - 1]!) / 2);
+        break;
+      }
+    }
+  }
+  // Con las franjas vecinas, el límite más afuera: así no hay saltos entre una altura y otra.
+  return (y) => {
+    const f = Math.floor(y / FRANJA_BRAZO);
+    let limite: number | null = null;
+    for (const df of [-1, 0, 1]) {
+      const valor = limites.get(f + df);
+      if (valor !== undefined) limite = Math.max(limite ?? 0, valor);
+    }
+    return limite;
+  };
+}
+
+/**
+ * Caída de la tela: bajo el pecho, una prenda de arriba cuelga recta desde lo más saliente del
+ * tronco (el pecho adelante, los omóplatos atrás) en vez de abrirse hacia afuera, y nunca entra
+ * en el cuerpo: si la cadera o el abdomen sobresalen, la tela se apoya sobre ellos.
+ */
+function dejarCaer(
+  posiciones: Float32Array[],
+  cuerpo: Float32Array,
+  zona: {
+    pecho: number;
+    axila: number;
+    centroZ: number;
+    semiancho: number;
+    pesoTronco: (i: number, parte: number) => number;
+    sector: (x: number, z: number) => number;
+    sectores: number;
+  },
+): void {
+  const { pecho, axila, centroZ, semiancho, pesoTronco, sector, sectores } = zona;
+  const radio = (x: number, z: number) => Math.hypot(x, z - centroZ);
+
+  // Hasta dónde llega la tela en cada dirección entre el pecho y la axila: desde ahí cuelga.
+  // Adelante y atrás se mide hasta la axila (el pecho y los omóplatos); en los costados solo a la
+  // altura del pecho, porque más arriba ya está la parte de abajo de la manga.
+  const colgado = new Float32Array(sectores);
+  cadaVertice(posiciones, (p, i, parte) => {
+    const x = p[i]!;
+    const y = p[i + 1]!;
+    const r = radio(x, p[i + 2]!);
+    const costado = r > 0 && Math.abs(x) / r > 0.7;
+    const tope = costado ? pecho + (axila - pecho) * 0.2 : axila;
+    if (y < pecho || y > tope || pesoTronco(i, parte) < 1) return;
+    const s = sector(x, p[i + 2]!);
+    colgado[s] = Math.max(colgado[s]!, r);
+  });
+
+  // El contorno del tronco del cuerpo por franjas de altura bajo el pecho, en cada dirección.
+  const franjas = new Map<number, Float32Array>();
+  for (let i = 0; i < cuerpo.length; i += 3) {
+    const x = cuerpo[i]!;
+    const y = cuerpo[i + 1]!;
+    if (y > pecho || Math.abs(x) > semiancho * 1.3) continue;
+    const f = Math.floor(y / FRANJA);
+    let fila = franjas.get(f);
+    if (!fila) franjas.set(f, (fila = new Float32Array(sectores)));
+    const s = sector(x, cuerpo[i + 2]!);
+    fila[s] = Math.max(fila[s]!, radio(x, cuerpo[i + 2]!));
+  }
+  const piel = (y: number, s: number) => {
+    let r = 0;
+    for (const df of [-1, 0, 1]) {
+      const fila = franjas.get(Math.floor(y / FRANJA) + df);
+      if (!fila) continue;
+      for (const ds of [-1, 0, 1]) r = Math.max(r, fila[(s + ds + sectores) % sectores]!);
+    }
+    return r;
+  };
+
+  // La tela puede tener dos capas (el dobladillo vuelto hacia adentro): en cada franja de altura y
+  // dirección todos sus puntos se mueven lo mismo, así las capas no se cruzan. La capa de afuera
+  // no pasa de la caída; la de adentro se apoya sobre lo que sobresale bajo el pecho (glúteos,
+  // cadera, abdomen) hasta unos centímetros más allá de la caída, donde ya están los brazos.
+  const limiteEn = (s: number) => {
+    let limite = 0;
+    for (const ds of [-1, 0, 1]) limite = Math.max(limite, colgado[(s + ds + sectores) % sectores]!);
+    return limite;
+  };
+  const extremos = new Map<number, { afuera: number; adentro: number }>();
+  const celda = (f: number, s: number) => f * sectores + s;
+  cadaVertice(posiciones, (p, i, parte) => {
+    const y = p[i + 1]!;
+    if (y >= pecho || pesoTronco(i, parte) === 0) return;
+    const r = radio(p[i]!, p[i + 2]!);
+    const clave = celda(Math.floor(y / FRANJA), sector(p[i]!, p[i + 2]!));
+    const e = extremos.get(clave);
+    if (e) {
+      e.afuera = Math.max(e.afuera, r);
+      e.adentro = Math.min(e.adentro, r);
+    } else {
+      extremos.set(clave, { afuera: r, adentro: r });
+    }
+  });
+  const corrimientos = new Map<number, number>();
+  for (const [clave, { afuera, adentro }] of extremos) {
+    const f = Math.floor(clave / sectores);
+    const s = clave - f * sectores;
+    const limite = limiteEn(s);
+    if (limite === 0) continue;
+    const exceso = Math.max(afuera - limite, 0);
+    const apoyo = Math.min(piel((f + 0.5) * FRANJA, s) + SEPARACION_TELA, limite + APOYO_MAXIMO);
+    const falta = Math.max(apoyo - (adentro - exceso), 0);
+    corrimientos.set(clave, falta - exceso);
+  }
+  // Corrimiento suavizado entre franjas y direcciones vecinas: sin escalones.
+  const corrimiento = (y: number, s: number) => {
+    const f = y / FRANJA - 0.5;
+    const f0 = Math.floor(f);
+    const t = f - f0;
+    let suma = 0;
+    let pesos = 0;
+    for (const [df, wf] of [[0, 1 - t], [1, t]] as const) {
+      for (const [ds, ws] of [[-1, 0.25], [0, 0.5], [1, 0.25]] as const) {
+        const valor = corrimientos.get(celda(f0 + df, (s + ds + sectores) % sectores));
+        if (valor === undefined) continue;
+        suma += valor * wf * ws;
+        pesos += wf * ws;
+      }
+    }
+    return pesos > 0 ? suma / pesos : 0;
+  };
+  cadaVertice(posiciones, (p, i, parte) => {
+    const x = p[i]!;
+    const y = p[i + 1]!;
+    const peso = pesoTronco(i, parte);
+    if (y >= pecho || peso === 0) return;
+    const z = p[i + 2]!;
+    const r = radio(x, z);
+    if (r === 0) return;
+    const k = 1 + (corrimiento(y, sector(x, z)) / r) * peso;
+    p[i] = x * k;
+    p[i + 2] = centroZ + (z - centroZ) * k;
+  });
 }
 
 /**
@@ -400,12 +696,19 @@ function ajustarAbajo(
   const cadera = abajo + ((ajuste.alturaMedida - ajuste.bordeInferior) / ajuste.largoVertical) * (arriba - abajo);
 
   // La talla de pantalón se elige por la cintura: esa holgura se lleva a la cadera del modelo.
-  const holguraTalla = Math.max(talla.contorno - cuerpo.cintura, 1);
-  const factor = (cuerpo.cadera + holguraTalla) / (cuerpo.cadera + Math.max(ajuste.holgura, 1));
+  // Se dibuja entre un mínimo y un máximo: con menos la piel atraviesa la tela y con más las
+  // caderas se inflan. Lo apretado o lo holgado de la talla lo indica el texto del ajuste.
+  const holguraTalla = Math.min(Math.max(talla.contorno - cuerpo.cintura, HOLGURA_PRETINA), HOLGURA_MAXIMA_DIBUJADA);
+  const base = cuerpo.cadera + Math.max(ajuste.holgura, 1);
+  const factor = (cuerpo.cadera + holguraTalla) / base;
+  // Una pretina holgada no se queda abierta alrededor del cuerpo: cae y se ajusta con el
+  // cinturón. Sobre la cadera, la holgura se va cerrando hasta quedar en no más de 4 cm.
+  const factorPretina = (cuerpo.cadera + Math.min(holguraTalla, HOLGURA_PRETINA)) / base;
   cadaVertice(posiciones, (p, i) => {
     const y = p[i + 1]!;
     const peso = Math.min(Math.max((y - entrepierna) / Math.max(cadera - entrepierna, 0.01), 0), 1);
-    const s = 1 + (factor - 1) * peso;
+    const haciaPretina = Math.min(Math.max((y - cadera) / Math.max(arriba - cadera, 0.01), 0), 1);
+    const s = 1 + (factor + (factorPretina - factor) * haciaPretina - 1) * peso;
     p[i] = p[i]! * s;
     p[i + 2] = centroZ + (p[i + 2]! - centroZ) * s;
   });

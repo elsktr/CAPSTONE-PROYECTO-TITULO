@@ -7,6 +7,7 @@ import {
   evaluarAjuste,
   medidasDeTalla,
   recomendarTalla,
+  reescalarMedidas,
   tablaDeTallas,
   tipoDePrenda,
   validarMedidas,
@@ -73,11 +74,70 @@ describe('estimarCuerpo', () => {
     expect(estimarCuerpo({ altura: 165, peso: 60, cintura: 80, sexo: 'femenino' }).cintura).toBe(80);
   });
 
+  it('una medida incoherente con la altura y el peso se lleva al límite y queda anotada', () => {
+    const cuerpo = estimarCuerpo({ altura: 180, peso: 180, cintura: 50 });
+    const sinCintura = estimarCuerpo({ altura: 180, peso: 180 });
+    expect(cuerpo.cintura).toBeGreaterThan(100);
+    expect(cuerpo.cintura).toBeLessThan(sinCintura.cintura);
+    expect(cuerpo.ajustadas).toEqual([{ medida: 'cintura', ingresada: 50, usada: cuerpo.cintura }]);
+
+    const delgado = estimarCuerpo({ altura: 150, peso: 40, pecho: 140 });
+    expect(delgado.pecho).toBeLessThan(110);
+    expect(delgado.ajustadas.map((a) => a.medida)).toEqual(['pecho']);
+  });
+
+  it('las medidas coherentes se usan tal cual, sin avisos', () => {
+    expect(estimarCuerpo(MEDIDAS_EJEMPLO).ajustadas).toEqual([]);
+    expect(estimarCuerpo({ altura: 175, peso: 78, cintura: 72 }).cintura).toBe(72);
+    expect(estimarCuerpo({ altura: 175, peso: 78, pecho: 118 }).pecho).toBe(118);
+    expect(estimarCuerpo({ altura: 175, peso: 78 }).ajustadas).toEqual([]);
+  });
+
+  it('la cintura no supera demasiado a la cadera ni al pecho', () => {
+    const cuerpo = estimarCuerpo({ altura: 170, peso: 95, pecho: 100, cadera: 100, cintura: 125 });
+    expect(cuerpo.cintura).toBeLessThanOrEqual(115);
+    expect(cuerpo.ajustadas.map((a) => a.medida)).toEqual(['cintura']);
+  });
+
+  it('en los extremos de altura y peso todas las medidas quedan en un cuerpo posible', () => {
+    for (const [altura, peso] of [[140, 35], [140, 180], [210, 35], [210, 180]] as const) {
+      for (const valor of [50, 160]) {
+        const c = estimarCuerpo({ altura, peso, pecho: valor, cintura: valor, cadera: valor });
+        expect(c.cintura).toBeLessThanOrEqual(Math.min(c.cadera, c.pecho) * 1.15 + 0.1);
+        for (const m of ['pecho', 'cintura', 'cadera'] as const) {
+          const estimado = estimarCuerpo({ altura, peso })[m];
+          expect(c[m] / estimado).toBeGreaterThan(0.65);
+          expect(c[m] / estimado).toBeLessThan(1.35);
+        }
+      }
+    }
+  });
+
   it('a igual altura, más peso da contornos mayores, y la cintura crece más que el pecho', () => {
     const delgado = estimarCuerpo({ altura: 175, peso: 60 });
     const grueso = estimarCuerpo({ altura: 175, peso: 100 });
     expect(grueso.pecho).toBeGreaterThan(delgado.pecho);
     expect(grueso.cintura / delgado.cintura).toBeGreaterThan(grueso.pecho / delgado.pecho);
+  });
+});
+
+describe('reescalarMedidas', () => {
+  it('al subir de peso, la cadera escrita crece como la estimada; pecho y cintura quedan fijos', () => {
+    const despues = reescalarMedidas(MEDIDAS_EJEMPLO, { altura: 175, peso: 98 });
+    expect(despues.peso).toBe(98);
+    expect(despues.cadera!).toBeGreaterThan(98);
+    expect(despues).toMatchObject({ pecho: 100, cintura: 86 });
+  });
+
+  it('al bajar de peso la cadera baja, y volver al peso inicial la deja como estaba', () => {
+    const menos = reescalarMedidas(MEDIDAS_EJEMPLO, { altura: 175, peso: 60 });
+    expect(menos.cadera!).toBeLessThan(98);
+    expect(reescalarMedidas(MEDIDAS_EJEMPLO, { altura: 175, peso: 78 })).toMatchObject({ pecho: 100, cintura: 86, cadera: 98 });
+  });
+
+  it('las medidas vacías siguen vacías y un peso fuera de rango no las toca', () => {
+    expect(reescalarMedidas({ altura: 175, peso: 78, cadera: 98 }, { altura: 175, peso: 90 }).pecho).toBeUndefined();
+    expect(reescalarMedidas(MEDIDAS_EJEMPLO, { altura: 175, peso: 5 })).toMatchObject({ peso: 5, pecho: 100, cintura: 86 });
   });
 });
 
@@ -89,6 +149,13 @@ describe('tipoDePrenda', () => {
     expect(tipoDePrenda('Chaquetas')).toBe('chaqueta');
     expect(tipoDePrenda('Pantalones')).toBe('pantalon');
     expect(tipoDePrenda('Cinturones')).toBe('cinturon');
+  });
+
+  it('una polera es de manga larga si lo dice su categoría o su nombre', () => {
+    expect(tipoDePrenda('Poleras', 'Polera Calavera')).toBe('polera');
+    expect(tipoDePrenda('Poleras', 'Polera manga larga Iron Maiden')).toBe('polera_manga_larga');
+    expect(tipoDePrenda('Poleras manga larga')).toBe('polera_manga_larga');
+    expect(tipoDePrenda('Polerones', 'Polerón manga larga')).toBe('poleron');
   });
 
   it('devuelve null para categorías sin tabla de medidas', () => {
@@ -118,6 +185,29 @@ describe('tablaDeTallas', () => {
   });
 });
 
+describe('medidas reales de las prendas', () => {
+  it('el contorno es el doble del ancho medido en la prenda estirada', () => {
+    expect(medidasDeTalla('polera', 'M')).toMatchObject({ contornoPrenda: 107, largo: 73 });
+    expect(medidasDeTalla('polera', 'XXXL')).toMatchObject({ contornoPrenda: 137, largo: 85 });
+    expect(medidasDeTalla('poleron', 'L')).toMatchObject({ contornoPrenda: 116, largo: 73, manga: 65 });
+  });
+
+  it('la XXL de manga larga se estima con la progresión de las demás tallas', () => {
+    expect(medidasDeTalla('polera_manga_larga', 'XL')).toMatchObject({ contornoPrenda: 122, largo: 79, manga: 66 });
+    expect(medidasDeTalla('polera_manga_larga', 'XXL')).toMatchObject({ contornoPrenda: 132, largo: 82, manga: 71 });
+  });
+
+  it('el pantalón se vende en talla chilena, con su equivalencia americana', () => {
+    expect(tablaDeTallas('pantalon').map((t) => `${t.talla}=${t.equivalencia}`)).toEqual(['40=30', '42=32', '44=34', '46=36', '48=38']);
+    expect(medidasDeTalla('pantalon', '42')).toMatchObject({ contornoPrenda: 85, cadera: 106, largo: 77 });
+  });
+
+  it('chaquetas y cinturones siguen con la tabla genérica', () => {
+    expect(tablaDeTallas('chaqueta').map((t) => t.talla)).toEqual(['XS', 'S', 'M', 'L', 'XL', 'XXL']);
+    expect(tablaDeTallas('cinturon').map((t) => t.talla)).toEqual(['Única']);
+  });
+});
+
 describe('evaluarAjuste', () => {
   const promedio = estimarCuerpo({ altura: 175, peso: 78 });
 
@@ -141,7 +231,23 @@ describe('evaluarAjuste', () => {
     expect(evaluarAjuste(alto, 'polera', 'M')?.largo).toBe('corta');
     expect(evaluarAjuste(bajo, 'polera', 'M')?.largo).toBe('larga');
     expect(evaluarAjuste(alto, 'pantalon', '44')?.largo).toBe('corta');
-    expect(evaluarAjuste(bajo, 'pantalon', '38')?.largo).toBe('larga');
+    expect(evaluarAjuste(bajo, 'pantalon', '40')?.largo).toBe('larga');
+  });
+
+  it('un pantalón aprieta si la cadera no cabe, aunque la cintura sí', () => {
+    const conCadera = estimarCuerpo({ altura: 175, peso: 78, cintura: 80, cadera: 110 });
+    expect(evaluarAjuste(conCadera, 'pantalon', '42')?.ancho).toBe('apretada');
+    expect(evaluarAjuste({ ...conCadera, cadera: 98 }, 'pantalon', '42')?.ancho).toBe('justa');
+  });
+
+  it('evalúa el largo de manga solo en las prendas con medida de manga', () => {
+    const alto = estimarCuerpo({ altura: 195, peso: 85 });
+    const bajo = estimarCuerpo({ altura: 155, peso: 52 });
+    expect(evaluarAjuste(promedio, 'polera_manga_larga', 'M')?.manga).toBe('adecuada');
+    expect(evaluarAjuste(alto, 'polera_manga_larga', 'M')?.manga).toBe('corta');
+    expect(evaluarAjuste(bajo, 'polera_manga_larga', 'XL')?.manga).toBe('larga');
+    expect(evaluarAjuste(promedio, 'poleron', 'M')?.manga).toBe('adecuada');
+    expect(evaluarAjuste(promedio, 'polera', 'M')?.manga).toBeUndefined();
   });
 
   it('el cinturón de talla única calza siempre en rango', () => {
@@ -162,8 +268,8 @@ describe('recomendarTalla', () => {
   });
 
   it('fuera de la tabla recomienda la talla del extremo más cercano', () => {
-    expect(recomendarTalla(estimarCuerpo({ altura: 150, peso: 38 }), 'polera')).toBe('XS');
-    expect(recomendarTalla(estimarCuerpo({ altura: 200, peso: 175 }), 'polera')).toBe('XXL');
+    expect(recomendarTalla(estimarCuerpo({ altura: 150, peso: 38 }), 'polera')).toBe('S');
+    expect(recomendarTalla(estimarCuerpo({ altura: 200, peso: 175 }), 'polera')).toBe('XXXL');
   });
 
   it('la talla recomendada siempre queda justa de ancho', () => {
@@ -171,8 +277,9 @@ describe('recomendarTalla', () => {
       const cuerpo = estimarCuerpo({ altura: 175, peso });
       const talla = recomendarTalla(cuerpo, 'polera');
       const ajuste = evaluarAjuste(cuerpo, 'polera', talla)!;
+      const tabla = tablaDeTallas('polera');
       const contorno = cuerpo.pecho;
-      const dentroDeTabla = contorno >= 82 && contorno < 128;
+      const dentroDeTabla = contorno >= tabla[0]!.desde && contorno < tabla[tabla.length - 1]!.hasta;
       if (dentroDeTabla) expect(ajuste.ancho).toBe('justa');
     }
   });
