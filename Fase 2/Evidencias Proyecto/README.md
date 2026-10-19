@@ -101,14 +101,14 @@ PostgreSQL 17 con **5 esquemas** (usuarios, inventario, ventas, pagos y logísti
 
 #### Resguardo de la calidad
 
-- **Pruebas automatizadas, 567 casos:**
+- **Pruebas automatizadas, 581 casos:**
 
   | Componente | Pruebas |
   |---|---|
   | API (unitarias y de punta a punta, incluida una de concurrencia del stock) | 191 |
   | App de bodega | 251 |
   | POS (unitarias, Cypress y máquina de cobro simulada) | 87 |
-  | Tienda web | 38 |
+  | Tienda web | 52 |
 
 - **Seguridad:**
   - contraseñas con Argon2id;
@@ -151,7 +151,7 @@ PostgreSQL 17 con **5 esquemas** (usuarios, inventario, ventas, pagos y logísti
 | Desarrollar una solución de software | Asistente de soporte Roxy | Angular, Vitest | 1 semana (octubre) | Elías Figueroa | Facilitador: catálogo y pedidos ya disponibles en la API | ✅ Completado | Actividad nueva (US-27) |
 | Desarrollar una solución de software | Reportes PDF/Excel (US-19) | API de ventas | 2 semanas (noviembre) | Exequiel Tapia | Depende del panel de Finanzas | ⏳ No iniciado | Se reprograma para noviembre |
 | Desarrollar una solución de software | Alertas de stock crítico (US-20) | API de inventario, app de bodega | 2 semanas (noviembre) | Jorge Piña | Requiere definir un stock mínimo por producto | ⏳ No iniciado | Se reprograma para noviembre |
-| Realizar pruebas de certificación de productos y procesos | Pruebas automatizadas unitarias y de punta a punta | Vitest, Cypress, PostgreSQL embebido | Continuo | Todo el equipo | Facilitador: entorno local con base en memoria | 🟢 En curso (567 pruebas) | Se adoptó como criterio de "terminado" |
+| Realizar pruebas de certificación de productos y procesos | Pruebas automatizadas unitarias y de punta a punta | Vitest, Cypress, PostgreSQL embebido | Continuo | Todo el equipo | Facilitador: entorno local con base en memoria | 🟢 En curso (581 pruebas) | Se adoptó como criterio de "terminado" |
 | Gestionar proyectos informáticos | Repositorio, ramas y CI (US-04) | GitHub, GitHub Actions | 1 semana (noviembre) | Exequiel Tapia | Dificultad: sin pipeline, las pruebas se corren a mano | 🟡 En curso | Falta el workflow que bloquee la fusión si fallan |
 | Desarrollar una solución de software | Implantación con Docker | Docker Compose | 1 semana (octubre) | Todo el equipo | Dificultad: configuración de Docker y WSL en Windows | ✅ Completado | Sistema completo en contenedores con un comando |
 | Gestionar proyectos informáticos | Piloto y capacitación | Tienda, equipo de bodega | 2 semanas (diciembre) | Todo el equipo | Requiere el sistema estable y las integraciones reales | ⏳ No iniciado (según plan) | Sin ajustes |
@@ -208,7 +208,7 @@ The main objective of Phase 1 has been achieved: stock is now synchronized acros
 
 Several adjustments were made along the way. The API gateway with five microservices was replaced by a single modular API, which keeps the separation by business area while reducing the infrastructure that a three-person team has to maintain. Firebase Authentication was replaced by in-house authentication based on RS256-signed JWTs and Argon2id password hashing. Since the Transbank and Starken credentials are still pending, payments and shipping run behind simulated adapters that can be swapped for the real services without changing the rest of the system.
 
-The team also delivered features beyond the original scope: a 3D virtual fitting room that recommends a size based on the customer's height, weight and body measurements; Roxy, a rule-based support assistant that answers with real catalog and order data; a manager dashboard with a daily income and expense balance for each sales channel; and a demand forecasting model that recommends where to invest. Quality is backed by 567 automated tests. The remaining work for the next sprints includes PDF/Excel reports, low-stock alerts, continuous integration, the real payment and shipping integrations, and user testing before the pilot.
+The team also delivered features beyond the original scope: a 3D virtual fitting room that recommends a size based on the customer's height, weight and body measurements; Roxy, a rule-based support assistant that answers with real catalog and order data; a manager dashboard with a daily income and expense balance for each sales channel; and a demand forecasting model that recommends where to invest. Quality is backed by 581 automated tests. The remaining work for the next sprints includes PDF/Excel reports, low-stock alerts, continuous integration, the real payment and shipping integrations, and user testing before the pilot.
 
 ---
 
