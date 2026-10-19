@@ -30,6 +30,10 @@ Las tablas se definen en `db/migrations`, en archivos numerados. El backend apli
 | `008_comunas` | Las 346 comunas de Chile |
 | `009_integridad_ventas` | Claves foráneas de reservas y movimientos hacia la venta |
 | `010_imagenes_bandas` | Foto de cada banda, con su tipo, su huella y su crédito |
+| `011_ofertas` | Ofertas mensuales: el precio rebajado de un producto durante un mes |
+| `012_conciertos_bandas` | Próximo concierto de cada banda en Chile: fecha y lugar |
+| `013_contacto_usuarios` | Teléfono y dirección de la cuenta, que el cliente entrega al registrarse |
+| `014_detalle_productos` | Tipo de estampado de cada producto y guía de tallas: ancho y largo por talla de cada categoría |
 
 Una migración ya aplicada no se modifica: un cambio al modelo es siempre un archivo nuevo.
 
@@ -37,7 +41,7 @@ Una migración ya aplicada no se modifica: un cambio al modelo es siempre un arc
 
 **Punto de venta.** Una venta POS escribe en `ventas.ventas` con canal `POS` y el vendedor, una fila en `ventas.detalle_venta` por prenda con la ubicación de donde salió, y descuenta `inventario.existencias` dejando un movimiento `VENTA`. El cobro queda en `pagos.transacciones` con un medio presencial, y su comisión en `ventas.costos_venta`.
 
-**E-commerce.** El catálogo sale de `inventario.productos` y `variantes`; la disponibilidad es la suma de `existencias` menos las `reservas` vigentes. El checkout crea la venta en estado `PENDIENTE_PAGO`, una reserva por prenda con vencimiento, la `logistica.solicitudes_despacho` con el destino y una transacción `PENDIENTE` con el token de la pasarela. Al confirmarse el pago, la reserva queda firme, la venta pasa a `PAGADA` y la solicitud se convierte en un `logistica.pedidos`. Si el pago falla o vence, la reserva se libera.
+**E-commerce.** El catálogo sale de `inventario.productos` y `variantes`; la disponibilidad es la suma de `existencias` menos las `reservas` vigentes. Un producto con una fila en `inventario.ofertas` para el mes en curso se publica y se cobra a ese precio de oferta, y la tienda lo anuncia en el carrusel de la portada. El cartel de la portada destaca las poleras de las bandas cuyo `concierto_fecha` en `inventario.bandas` cae dentro de los próximos doce meses. El checkout crea la venta en estado `PENDIENTE_PAGO`, una reserva por prenda con vencimiento, la `logistica.solicitudes_despacho` con el destino y una transacción `PENDIENTE` con el token de la pasarela. Al confirmarse el pago, la reserva queda firme, la venta pasa a `PAGADA` y la solicitud se convierte en un `logistica.pedidos`. Si el pago falla o vence, la reserva se libera.
 
 **App de bodega.** Usa `inventario` completo y lee los pedidos de `logistica`.
 
@@ -89,6 +93,7 @@ Cada uno es un valor histórico que no debe cambiar cuando cambia su origen, o u
 
 - **`logistica.solicitudes_despacho`** no estaba en el diseño. Guarda el destino de una compra mientras se paga. Al confirmarse el pago se convierte en pedido y se elimina, de modo que el destino no queda en dos lugares.
 - **`inventario.operaciones`** guarda la clave de idempotencia de cada operación. El diseño la ponía única en `movimientos`, pero un ingreso de varias prendas registra varios movimientos con la misma clave.
+- **`inventario.ofertas`** no estaba en el diseño, que dejaba los descuentos fuera del alcance. Guarda el precio de oferta de un producto para un mes calendario, a lo más una por producto y mes. El mes se cuenta con la hora de Chile. Las de meses pasados quedan como historial.
 - **`inventario.categorias`** guarda además si la categoría usa banda, su zona de bodega y la última posición entregada; `categorias_tallas` guarda las tallas que admite.
 - **`ventas.visitas`** lleva un identificador de sesión único, que es lo que permite contar una visita una sola vez.
 - **`ventas.detalle_venta.id_ubicacion`** registra de qué ubicación salió cada línea de una venta POS.
@@ -147,6 +152,8 @@ erDiagram
     smallint id_rol FK
     boolean activo
     timestamptz creado_en
+    text telefono
+    text direccion
   }
   usuarios ||--o{ sesiones : "id_usuario"
   roles ||--o{ usuarios : "id_rol"
@@ -164,6 +171,8 @@ erDiagram
     text imagen_tipo
     text imagen_huella
     text imagen_credito
+    date concierto_fecha
+    text concierto_lugar
   }
   busquedas {
     bigint id_busqueda PK
@@ -184,6 +193,8 @@ erDiagram
     integer id_categoria PK, FK
     integer id_talla PK, FK
     integer orden
+    integer ancho_cm
+    integer largo_cm
   }
   colores {
     integer id_color PK
@@ -219,6 +230,14 @@ erDiagram
     bigint id_venta FK
     text clave_idempotencia FK
   }
+  ofertas {
+    integer id_oferta PK
+    integer id_producto FK
+    date mes
+    integer precio_oferta
+    integer id_usuario FK
+    timestamptz creada_en
+  }
   operaciones {
     text clave_idempotencia PK
     text tipo
@@ -234,6 +253,7 @@ erDiagram
     text clave
     text descripcion
     text imagen_url
+    text tipo_estampado
     integer precio
     integer costo_compra
     integer peso_gramos
@@ -289,6 +309,7 @@ erDiagram
   ubicaciones ||--o{ movimientos : "id_ubicacion"
   ubicaciones |o--o{ movimientos : "id_ubicacion_destino"
   variantes ||--o{ movimientos : "id_variante"
+  productos ||--o{ ofertas : "id_producto"
   bandas |o--o{ productos : "id_banda"
   categorias ||--o{ productos : "id_categoria"
   variantes ||--o{ reservas : "id_variante"
@@ -464,6 +485,7 @@ erDiagram
   "usuarios.usuarios" ||--o{ "inventario.conteos" : "id_usuario"
   "usuarios.usuarios" ||--o{ "inventario.movimientos" : "id_usuario"
   "ventas.ventas" |o--o{ "inventario.movimientos" : "id_venta"
+  "usuarios.usuarios" ||--o{ "inventario.ofertas" : "id_usuario"
   "usuarios.usuarios" ||--o{ "inventario.operaciones" : "id_usuario"
   "ventas.ventas" ||--o{ "inventario.reservas" : "id_venta"
   "usuarios.usuarios" |o--o{ "logistica.historial_pedido" : "id_usuario"

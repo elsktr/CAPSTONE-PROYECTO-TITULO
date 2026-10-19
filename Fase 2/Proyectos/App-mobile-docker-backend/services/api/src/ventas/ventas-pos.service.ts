@@ -16,7 +16,7 @@ import { BaseDeDatos, type Ejecutor } from '../db/base-de-datos.js';
 import { StockService, totalDe } from '../inventario/stock.service.js';
 import { ID_UBICACION } from '../inventario/ubicaciones.js';
 
-const MEDIOS_PRESENCIALES: readonly MedioPresencial[] = ['EFECTIVO', 'DEBITO_PRESENCIAL', 'CREDITO_PRESENCIAL'];
+const MEDIOS_PRESENCIALES: readonly MedioPresencial[] = ['EFECTIVO', 'DEBITO_PRESENCIAL', 'CREDITO_PRESENCIAL', 'TRANSFERENCIA'];
 
 interface LineaDeVenta {
   idVariante: number;
@@ -36,7 +36,7 @@ interface DatosDeVariante {
 const COMPROBANTES = `
   SELECT ve.id_venta, ve.fecha, ve.total, vd.nombre AS vendedor, cl.nombre AS cliente,
          mp.codigo AS medio_codigo, mp.nombre AS medio_nombre,
-         t.codigo_autorizacion, t.ultimos_digitos,
+         t.codigo_autorizacion, t.ultimos_digitos, t.numero_operacion,
          COALESCE((
            SELECT json_agg(json_build_object(
                     'idVariante', v.id_variante, 'sku', v.sku, 'producto', p.nombre, 'talla', ta.nombre,
@@ -66,6 +66,7 @@ interface FilaComprobante {
   medio_nombre: string;
   codigo_autorizacion: string | null;
   ultimos_digitos: string | null;
+  numero_operacion: string | null;
   lineas: ComprobantePos['lineas'];
 }
 
@@ -76,6 +77,7 @@ const comprobanteDe = (fila: FilaComprobante): ComprobantePos => ({
   cliente: fila.cliente,
   medioPago: { codigo: fila.medio_codigo, nombre: fila.medio_nombre },
   pagoMaquina: fila.codigo_autorizacion === null ? null : { codigoAutorizacion: fila.codigo_autorizacion, ultimosDigitos: fila.ultimos_digitos },
+  numeroOperacion: fila.numero_operacion,
   lineas: fila.lineas,
   total: fila.total,
 });
@@ -103,6 +105,7 @@ export class VentasPosService {
     exigir(datos.idCliente === undefined || datos.idCliente === null || Number.isInteger(datos.idCliente), 'El cliente no es válido.');
     const idCliente = datos.idCliente ?? null;
     const pagoMaquina = this.pagoMaquinaValido(datos.pagoMaquina, medioPago);
+    const numeroOperacion = this.numeroOperacionValido(datos.numeroOperacion, medioPago);
     // La clave se guarda junto al vendedor: la de uno nunca coincide con la de otro.
     const clave = `pos:${vendedor.id}:${datos.claveIdempotencia}`;
 
@@ -171,8 +174,8 @@ export class VentasPosService {
       await tx.consultar('INSERT INTO ventas.costos_venta (id_venta, comision_pago) VALUES ($1, $2)', [idVenta, medio!.comision]);
       await tx.consultar(
         `INSERT INTO pagos.transacciones
-           (id_venta, id_medio, monto, estado, comision, resuelto_en, codigo_autorizacion, ultimos_digitos, id_cobro_maquina)
-         VALUES ($1, $2, $3, 'AUTORIZADA', $4, now(), $5, $6, $7)`,
+           (id_venta, id_medio, monto, estado, comision, resuelto_en, codigo_autorizacion, ultimos_digitos, id_cobro_maquina, numero_operacion)
+         VALUES ($1, $2, $3, 'AUTORIZADA', $4, now(), $5, $6, $7, $8)`,
         [
           idVenta,
           medio!.id_medio,
@@ -181,6 +184,7 @@ export class VentasPosService {
           pagoMaquina?.codigoAutorizacion ?? null,
           pagoMaquina?.ultimosDigitos ?? null,
           pagoMaquina?.idCobro ?? null,
+          numeroOperacion,
         ],
       );
       return this.comprobante(tx, idVenta);
@@ -200,10 +204,18 @@ export class VentasPosService {
     return filas.map(comprobanteDe);
   }
 
+  /** Número de operación de una transferencia; opcional, y solo con transferencia. */
+  private numeroOperacionValido(numero: unknown, medioPago: MedioPresencial): string | null {
+    if (numero === undefined || numero === null || numero === '') return null;
+    exigir(medioPago === 'TRANSFERENCIA', 'El número de operación es solo para transferencias.');
+    exigir(typeof numero === 'string' && /^[A-Za-z0-9-]{1,40}$/.test(numero.trim()), 'El número de operación no es válido.');
+    return numero.trim();
+  }
+
   /** El pago informado por la máquina de cobro, si lo hay. Solo la tarjeta pasa por ella. */
   private pagoMaquinaValido(pago: unknown, medioPago: MedioPresencial): Required<PagoMaquina> | null {
     if (pago === undefined || pago === null) return null;
-    exigir(medioPago !== 'EFECTIVO', 'El efectivo no pasa por la máquina de cobro.');
+    exigir(medioPago === 'DEBITO_PRESENCIAL' || medioPago === 'CREDITO_PRESENCIAL', 'Solo la tarjeta pasa por la máquina de cobro.');
     const { idCobro, codigoAutorizacion, ultimosDigitos } = (typeof pago === 'object' ? pago : {}) as Partial<PagoMaquina>;
     exigir(typeof idCobro === 'string' && /^[\w-]{1,100}$/.test(idCobro), 'El cobro de la máquina no es válido.');
     exigir(

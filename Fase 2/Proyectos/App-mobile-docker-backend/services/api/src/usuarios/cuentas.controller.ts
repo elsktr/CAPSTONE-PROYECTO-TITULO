@@ -15,8 +15,8 @@ export class CuentasController {
    */
   @Get('yo')
   async yo(@UsuarioActual() usuario: Usuario): Promise<PerfilUsuario> {
-    const [cuenta] = await this.db.consultar<Usuario & { creado_en: Date }>(
-      `SELECT u.id_usuario AS id, u.nombre, u.email, r.nombre AS rol, u.creado_en
+    const [cuenta] = await this.db.consultar<Usuario & { creado_en: Date; telefono: string | null; direccion: string | null }>(
+      `SELECT u.id_usuario AS id, u.nombre, u.email, r.nombre AS rol, u.creado_en, u.telefono, u.direccion
        FROM usuarios.usuarios u JOIN usuarios.roles r USING (id_rol)
        WHERE u.id_usuario = $1 AND u.activo`,
       [usuario.id],

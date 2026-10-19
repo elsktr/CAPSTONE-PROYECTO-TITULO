@@ -55,6 +55,7 @@ describe('POS - Máquina de cobro simulada (contenedor)', () => {
 
     cy.get('.scan-input').type('POL-NEG-M{enter}');
     cy.get('ion-button.cobrar-button').click();
+    cy.get('[data-medio="TARJETA"]').click();
     cy.get('ion-radio[value="CREDITO_PRESENCIAL"]').click();
     cy.contains('ion-button', 'Cobrar $15.000 en la máquina').click();
     cy.contains('Esperando el pago en la máquina').should('be.visible');

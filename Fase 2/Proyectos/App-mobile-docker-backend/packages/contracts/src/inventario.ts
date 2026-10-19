@@ -178,8 +178,13 @@ export interface ArticuloCatalogo {
   banda: string | null;
   talla: string;
   color: string;
+  /** Lo que se cobra hoy: el precio de oferta si el producto está en oferta este mes. */
   precio: number;
+  /** Precio normal del producto cuando está en oferta este mes; `null` si no lo está. */
+  precioNormal: number | null;
   descripcion: string | null;
+  /** Técnica del estampado del producto, por ejemplo "Serigrafía"; `null` si no está registrada. */
+  tipoEstampado: string | null;
   imagenUrl: string | null;
   disponible: number;
 }
@@ -192,7 +197,10 @@ export interface VarianteGestion extends VarianteStock {
   idProducto: number;
   /** `null` mientras el Gerente no lo define; sin precio el producto no se publica en la tienda. */
   precio: number | null;
+  /** Precio de oferta de este mes; `null` si el producto no está en oferta. */
+  precioOferta: number | null;
   descripcion: string | null;
+  tipoEstampado: string | null;
 }
 
 /**
@@ -200,10 +208,45 @@ export interface VarianteGestion extends VarianteStock {
  *
  * Cambia los datos comerciales del producto. Solo se modifican los campos enviados.
  * Un precio `null` retira el producto de la tienda. Responde sus variantes.
+ *
+ * `precioOferta` pone el producto en oferta por lo que queda del mes en curso: la tienda
+ * cobra ese precio y al cambiar el mes vuelve al normal. Debe ser menor que el precio;
+ * `null` quita la oferta. Dejar el producto sin precio también se la quita.
  */
 export interface ProductoEdicionRequest {
   precio?: number | null;
+  precioOferta?: number | null;
   descripcion?: string | null;
+  /** Técnica del estampado, por ejemplo "Serigrafía"; `null` o vacío la quita. */
+  tipoEstampado?: string | null;
+}
+
+/** Medidas de una talla, de la prenda extendida y en centímetros; `null` mientras no se registran. */
+export interface MedidaDeTalla {
+  talla: string;
+  /** De lado a lado, a la altura del pecho o de la cintura según la prenda. */
+  anchoCm: number | null;
+  largoCm: number | null;
+}
+
+/**
+ * Guía de tallas de una categoría: cuánto mide cada talla que admite, en su orden.
+ * GET /inventario/catalogo/guias-tallas (público) entrega la de todas las categorías.
+ */
+export interface GuiaDeTallas {
+  categoria: string;
+  tallas: MedidaDeTalla[];
+}
+
+/**
+ * PUT /inventario/categorias/medidas (Bodega, Gerente)
+ *
+ * Guarda las medidas de las tallas de una categoría. Solo cambian las tallas enviadas, y
+ * deben ser tallas que la categoría admite. Responde la guía completa de la categoría.
+ */
+export interface MedidasDeCategoriaRequest {
+  categoria: string;
+  tallas: MedidaDeTalla[];
 }
 
 /** Banda tal como la muestra la tienda. GET /inventario/catalogo/bandas (público) */
@@ -214,6 +257,30 @@ export interface BandaCatalogo {
   imagenUrl: string | null;
   /** Autor y licencia de la foto, para mostrarlos junto a ella. */
   credito: string | null;
+  /** Próximo concierto de la banda en Chile, tal como está registrado; `null` si no tiene. Puede ser una fecha ya pasada. */
+  concierto: ConciertoBanda | null;
+}
+
+export interface ConciertoBanda {
+  /** Día del concierto, `AAAA-MM-DD`. */
+  fecha: string;
+  /** Recinto y ciudad, por ejemplo "Estadio Nacional, Santiago". */
+  lugar: string | null;
+}
+
+/**
+ * PUT /inventario/bandas/concierto (Bodega, Gerente)
+ *
+ * Registra el próximo concierto de una banda en Chile, reemplazando el anterior. La
+ * tienda destaca en su portada las poleras de las bandas que vienen dentro de los
+ * próximos doce meses. `fecha: null` lo quita. Si la banda no existe, la registra.
+ * Responde la banda.
+ */
+export interface ConciertoBandaRequest {
+  banda: string;
+  /** Día del concierto, `AAAA-MM-DD`. */
+  fecha: string | null;
+  lugar?: string | null;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 
+import { AsesorModule } from './asesor/asesor.module.js';
 import { SesionGuard } from './auth/sesion.guard.js';
 import { TokensService } from './auth/tokens.service.js';
 import { FiltroDeErrores } from './comun/filtro-errores.js';
@@ -15,12 +16,12 @@ import { CuentasController } from './usuarios/cuentas.controller.js';
 import { VentasModule } from './ventas/ventas.module.js';
 
 /**
- * Un solo servicio con los dominios de Usuarios, Inventario, Logística, Ventas y Pagos como módulos.
+ * Un solo servicio con los dominios de Usuarios, Inventario, Logística, Ventas, Pagos y el asesor de inversión como módulos.
  * Publica las mismas rutas `/api/v1/<dominio>/...` que el diseño reparte entre el
  * gateway y los servicios, de modo que separarlos después no cambia a los clientes.
  */
 @Module({
-  imports: [DbModule, InventarioModule, LogisticaModule, VentasModule, AnaliticaModule],
+  imports: [DbModule, InventarioModule, LogisticaModule, VentasModule, AnaliticaModule, AsesorModule],
   controllers: [AuthController, CuentasController, SaludController],
   providers: [
     AuthService,

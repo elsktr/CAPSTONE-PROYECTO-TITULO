@@ -4,12 +4,12 @@
  * - En desarrollo (`npm run dev`) usa VITE_API_URL (http://localhost:3000/api/v1).
  * - En Docker usa el mismo origen (`/api/v1/...`): nginx reenvia al backend,
  *   asi no hay CORS que configurar.
+ * - En la app instalada, la dirección del equipo servidor (ver `servidor.ts`).
  * - El POS NUNCA se conecta directo a PostgreSQL desde el navegador;
  *   DATABASE_URL es solo para scripts Node (ver .env.example).
  */
 
-// Base de la API: misma origen en Docker, localhost en dev.
-const BASE = import.meta.env.VITE_API_URL ?? '/api/v1';
+import { baseApi } from './servidor';
 
 /** Rechazo de la API: `{ codigo, mensaje, detalle }`. El codigo permite reaccionar a casos puntuales. */
 export class ErrorApi extends Error {
@@ -118,14 +118,14 @@ export interface VarianteGestion {
 
 /** GET /salud: el backend responde { estado: 'ok' }. */
 export async function salud(): Promise<boolean> {
-  const res = await fetch(`${BASE}/salud`);
+  const res = await fetch(`${baseApi()}/salud`);
   const cuerpo = (await leerJson(res)) as { estado?: string };
   return cuerpo.estado === 'ok';
 }
 
 /** POST /usuarios/auth/login con { email, password }. Cuentas demo en README. */
 export async function login(email: string, password: string): Promise<Sesion> {
-  const res = await fetch(`${BASE}/usuarios/auth/login`, {
+  const res = await fetch(`${baseApi()}/usuarios/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -135,7 +135,7 @@ export async function login(email: string, password: string): Promise<Sesion> {
 
 /** GET /inventario/catalogo: lo que ve un cliente (con precio y stock). */
 export async function getCatalogo(): Promise<ArticuloCatalogo[]> {
-  const res = await fetch(`${BASE}/inventario/catalogo`);
+  const res = await fetch(`${baseApi()}/inventario/catalogo`);
   return (await leerJson(res)) as ArticuloCatalogo[];
 }
 
@@ -145,7 +145,7 @@ export async function getCatalogo(): Promise<ArticuloCatalogo[]> {
  * VENDEDOR, BODEGA o GERENTE. Estos son los productos de las pruebas.
  */
 export async function getProductos(accessToken: string): Promise<VarianteGestion[]> {
-  const res = await fetch(`${BASE}/inventario/productos`, {
+  const res = await fetch(`${baseApi()}/inventario/productos`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return (await leerJson(res)) as VarianteGestion[];
@@ -156,7 +156,7 @@ export async function buscarVariantes(
   accessToken: string,
   q: string,
 ): Promise<VarianteGestion[]> {
-  const res = await fetch(`${BASE}/inventario/variantes?q=${encodeURIComponent(q)}`, {
+  const res = await fetch(`${baseApi()}/inventario/variantes?q=${encodeURIComponent(q)}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return (await leerJson(res)) as VarianteGestion[];
@@ -178,7 +178,7 @@ export interface VarianteEscaneada {
  * codigo de barras de la etiqueta o el SKU que lleva su QR. Responde 404 si no existe.
  */
 export async function buscarPorCodigo(accessToken: string, codigo: string): Promise<VarianteEscaneada> {
-  const res = await fetch(`${BASE}/inventario/variantes/por-codigo/${encodeURIComponent(codigo)}`, {
+  const res = await fetch(`${baseApi()}/inventario/variantes/por-codigo/${encodeURIComponent(codigo)}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return (await leerJson(res)) as VarianteEscaneada;
@@ -188,7 +188,7 @@ export async function buscarPorCodigo(accessToken: string, codigo: string): Prom
  * Medios con que se cobra en la tienda. La tarjeta se pasa por el terminal fisico:
  * el POS solo registra el medio, no hay pasarela (Webpay es solo de la tienda web).
  */
-export type MedioPresencial = 'EFECTIVO' | 'DEBITO_PRESENCIAL' | 'CREDITO_PRESENCIAL';
+export type MedioPresencial = 'EFECTIVO' | 'DEBITO_PRESENCIAL' | 'CREDITO_PRESENCIAL' | 'TRANSFERENCIA';
 
 export interface LineaVentaPos {
   idVariante: number;
@@ -213,6 +213,8 @@ export interface VentaPosRequest {
   idCliente?: number;
   /** Solo si la tarjeta se cobro en la maquina: el backend guarda la autorizacion con la venta. */
   pagoMaquina?: PagoMaquina;
+  /** Solo con transferencia: numero de operacion del comprobante del banco. */
+  numeroOperacion?: string;
 }
 
 /** Detalle del rechazo EXISTENCIA_EN_BODEGA: lineas que la sala no alcanza. */
@@ -245,13 +247,15 @@ export interface ComprobantePos {
   medioPago: { codigo: MedioPresencial; nombre: string };
   /** Autorizacion guardada de la maquina de cobro; null en efectivo o terminal aparte. */
   pagoMaquina: { codigoAutorizacion: string; ultimosDigitos: string | null } | null;
+  /** Numero de operacion de una transferencia, si se informo. */
+  numeroOperacion: string | null;
   lineas: LineaComprobantePos[];
   total: number;
 }
 
 /** POST /ventas/pos (VENDEDOR): registra la venta, descuenta stock y devuelve el comprobante. */
 export async function registrarVentaPos(accessToken: string, datos: VentaPosRequest): Promise<ComprobantePos> {
-  const res = await fetch(`${BASE}/ventas/pos`, {
+  const res = await fetch(`${baseApi()}/ventas/pos`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -264,8 +268,67 @@ export async function registrarVentaPos(accessToken: string, datos: VentaPosRequ
 
 /** GET /ventas/pos: ventas POS del dia del vendedor, de la mas reciente a la mas antigua. */
 export async function getVentasPos(accessToken: string): Promise<ComprobantePos[]> {
-  const res = await fetch(`${BASE}/ventas/pos`, {
+  const res = await fetch(`${baseApi()}/ventas/pos`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return (await leerJson(res)) as ComprobantePos[];
+}
+
+// --- Cierre de caja ---
+
+/** Ventas y monto de un medio de pago en una caja. */
+export interface TotalMedio {
+  codigo: MedioPresencial;
+  nombre: string;
+  ventas: number;
+  total: number;
+}
+
+/** GET /ventas/pos/caja: las ventas del vendedor que aun no entran en un cierre. */
+export interface CajaAbierta {
+  desde: string | null;
+  ventas: number;
+  total: number;
+  porMedio: TotalMedio[];
+  ultimoCierre: { idCierre: number; fecha: string; fondoInicial: number } | null;
+}
+
+export interface CierreCajaRequest {
+  claveIdempotencia: string;
+  fondoInicial: number;
+  efectivoContado: number;
+  observacion?: string;
+}
+
+export interface CierreCaja {
+  idCierre: number;
+  vendedor: string;
+  fecha: string;
+  desde: string | null;
+  hasta: string | null;
+  ventas: number;
+  total: number;
+  porMedio: TotalMedio[];
+  fondoInicial: number;
+  efectivoVentas: number;
+  efectivoEsperado: number;
+  efectivoContado: number;
+  /** Contado - esperado: positivo sobra, negativo falta. */
+  diferencia: number;
+  observacion: string | null;
+}
+
+export async function getCajaAbierta(accessToken: string): Promise<CajaAbierta> {
+  const res = await fetch(`${baseApi()}/ventas/pos/caja`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  return (await leerJson(res)) as CajaAbierta;
+}
+
+/** POST /ventas/pos/cierres: cierra la caja; reenviar la misma clave responde el mismo cierre. */
+export async function cerrarCaja(accessToken: string, datos: CierreCajaRequest): Promise<CierreCaja> {
+  const res = await fetch(`${baseApi()}/ventas/pos/cierres`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(datos),
+  });
+  return (await leerJson(res)) as CierreCaja;
 }

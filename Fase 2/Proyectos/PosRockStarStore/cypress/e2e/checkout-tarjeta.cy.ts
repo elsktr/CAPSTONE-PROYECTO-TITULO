@@ -38,6 +38,7 @@ function venderUnaPolera(medio: string) {
   cy.wait('@login');
 
   cy.contains('Medio de pago').should('be.visible');
+  cy.get('[data-medio="TARJETA"]').click();
   cy.get(`ion-radio[value="${medio}"]`).click();
   cy.contains('Confirmar y pagar').click();
 }

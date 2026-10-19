@@ -35,6 +35,12 @@ export interface RegistroRequest {
   nombre: string;
   email: string;
   password: string;
+  /**
+   * Teléfono chileno: el prefijo +56 y nueve dígitos. Se aceptan espacios y guiones, y el
+   * prefijo puede omitirse; se guarda siempre como `+56912345678`.
+   */
+  telefono: string;
+  direccion: string;
 }
 
 /** Cuenta del personal. GET /usuarios/internos (Gerente, RRHH) */
@@ -46,4 +52,7 @@ export interface CuentaInterna extends Usuario {
 export interface PerfilUsuario extends Usuario {
   /** Cuándo se creó la cuenta. */
   creadoEn: string;
+  /** Teléfono con su prefijo, por ejemplo `+56912345678`; `null` en las cuentas que no lo registraron. */
+  telefono: string | null;
+  direccion: string | null;
 }

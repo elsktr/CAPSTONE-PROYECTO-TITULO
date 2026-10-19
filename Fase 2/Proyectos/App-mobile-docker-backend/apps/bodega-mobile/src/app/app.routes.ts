@@ -37,28 +37,17 @@ export const routes: Routes = [
         loadComponent: () => import('./features/merma/merma.page').then((m) => m.MermaPage),
       },
       {
-        path: 'traspaso',
-        loadComponent: () => import('./features/traspaso/traspaso.page').then((m) => m.TraspasoPage),
-      },
-      {
-        path: 'conteo',
-        loadComponent: () => import('./features/conteo/conteo.page').then((m) => m.ConteoPage),
-      },
-      {
-        path: 'busqueda',
-        loadComponent: () => import('./features/busqueda/busqueda.page').then((m) => m.BusquedaPage),
-      },
-      {
         path: 'espacios',
         loadComponent: () => import('./features/espacios/espacios.page').then((m) => m.EspaciosPage),
       },
       {
-        path: 'etiquetas',
-        loadComponent: () => import('./features/etiquetas/etiquetas.page').then((m) => m.EtiquetasPage),
-      },
-      {
         path: 'envios',
         loadComponent: () => import('./features/envios/envios.page').then((m) => m.EnviosPage),
+      },
+      // Etiquetas y edición no están en el menú: se abren desde la ficha de una prenda.
+      {
+        path: 'etiquetas',
+        loadComponent: () => import('./features/etiquetas/etiquetas.page').then((m) => m.EtiquetasPage),
       },
       {
         path: '',

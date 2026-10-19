@@ -62,6 +62,7 @@ function entrar(maquinaActiva = true) {
 function cobrarConDebito() {
   cy.get('.scan-input').type('POL-NEG-M{enter}');
   cy.get('ion-button.cobrar-button').click();
+  cy.get('[data-medio="TARJETA"]').click();
   cy.get('ion-radio[value="DEBITO_PRESENCIAL"]').click();
   cy.contains('ion-button', 'Cobrar $15.000 en la máquina').click();
 }
@@ -169,7 +170,7 @@ describe('POS - Máquina de cobro', () => {
     cy.get('@venta.all').should('have.length', 0);
 
     cy.contains('ion-button', 'Cambiar medio de pago').click();
-    cy.get('ion-radio[value="EFECTIVO"]').click();
+    cy.get('[data-medio="EFECTIVO"]').click();
     cy.contains('Confirmar y pagar').click();
     cy.wait('@venta').its('request.body.medioPago').should('equal', 'EFECTIVO');
   });
@@ -235,7 +236,7 @@ describe('POS - Máquina de cobro', () => {
     entrar();
     cy.get('.scan-input').type('POL-NEG-M{enter}');
     cy.get('ion-button.cobrar-button').click();
-    cy.get('ion-radio[value="EFECTIVO"]').click();
+    cy.get('[data-medio="EFECTIVO"]').click();
     cy.contains('Confirmar y pagar').click();
 
     cy.wait('@venta');

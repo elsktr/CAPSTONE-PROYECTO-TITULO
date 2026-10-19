@@ -9,12 +9,17 @@ export interface Product {
   name: string;
   category: string;
   band: string | null;
+  /** Lo que se cobra: el precio de oferta si el producto está en oferta este mes. */
   price: number;
+  /** Precio normal cuando el producto está en oferta este mes; `null` si no lo está. */
+  listPrice: number | null;
   size: string;
   color: string;
   /** Unidades que se pueden comprar en este momento. */
   stock: number;
   description?: string;
+  /** Técnica del estampado, por ejemplo "Serigrafía"; `null` si no está registrada. */
+  printType: string | null;
   image: string;
 }
 
@@ -80,10 +85,12 @@ export function toProduct(articulo: ArticuloCatalogo): Product {
     category: articulo.categoria,
     band: articulo.banda,
     price: articulo.precio,
+    listPrice: articulo.precioNormal,
     size: articulo.talla,
     color: articulo.color,
     stock: articulo.disponible,
     ...(articulo.descripcion ? { description: articulo.descripcion } : {}),
+    printType: articulo.tipoEstampado,
     image: articulo.imagenUrl ?? PLACEHOLDER_IMAGE,
   };
 }
@@ -94,6 +101,49 @@ export const formatCLP = (value: number): string =>
     currency: 'CLP',
     maximumFractionDigits: 0,
   }).format(value);
+
+/** Prefijo de los teléfonos de Chile; la tienda lo pone ella, el cliente escribe solo su número. */
+export const PHONE_PREFIX = '+56';
+/** Dígitos de un número chileno, fijo o móvil, después del prefijo. */
+export const PHONE_DIGITS = 9;
+
+/**
+ * Deja lo escrito en el campo de teléfono como los dígitos del número, sin el prefijo:
+ * quita espacios y signos, y también el +56 si venía incluido al pegar un número completo.
+ */
+export function phoneDigits(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  return (digits.length > PHONE_DIGITS && digits.startsWith('56') ? digits.slice(2) : digits).slice(0, PHONE_DIGITS);
+}
+
+/** Un teléfono guardado (`+56912345678`) para mostrar: "+56 9 1234 5678". */
+export function formatPhone(phone: string): string {
+  const match = /^\+56(\d)(\d{4})(\d{4})$/.exec(phone);
+  return match ? `${PHONE_PREFIX} ${match[1]} ${match[2]} ${match[3]}` : phone;
+}
+
+/** Porcentaje de rebaja de un precio de oferta respecto del precio normal, sin decimales. */
+export const discountPercent = (price: number, listPrice: number): number => Math.round((1 - price / listPrice) * 100);
+
+const MONTH_FORMAT = new Intl.DateTimeFormat('es-CL', { month: 'long', timeZone: 'America/Santiago' });
+
+/** Nombre del mes en curso en Chile, por ejemplo "octubre": las ofertas rigen por mes calendario. */
+export const currentMonthName = (): string => MONTH_FORMAT.format(new Date());
+
+/** El locale `en-CA` escribe las fechas como `AAAA-MM-DD`, que se pueden comparar como texto. */
+const TODAY_FORMAT = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' });
+
+/** Indica si un día `AAAA-MM-DD` cae entre hoy y doce meses más, con la fecha de Chile. */
+export function isWithinNextYear(day: string): boolean {
+  const today = TODAY_FORMAT.format(new Date());
+  const limit = `${Number(today.slice(0, 4)) + 1}${today.slice(4)}`;
+  return day >= today && day <= limit;
+}
+
+const DAY_FORMAT = new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+/** Un día `AAAA-MM-DD` para mostrar, por ejemplo "31 oct 2026". */
+export const formatDay = (day: string): string => DAY_FORMAT.format(new Date(`${day}T00:00:00Z`));
 
 const DATE_FORMAT = new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium', timeStyle: 'short' });
 

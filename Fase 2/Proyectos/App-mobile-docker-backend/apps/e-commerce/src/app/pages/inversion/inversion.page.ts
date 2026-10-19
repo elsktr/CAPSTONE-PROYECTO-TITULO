@@ -61,7 +61,7 @@ const METODO: Record<string, string | undefined> = {
         <a routerLink="/admin" class="volver"><ion-icon name="arrow-back-outline" aria-hidden="true"></ion-icon> Finanzas & RRHH</a>
         <div class="page-title">
           <div class="section-title"><ion-icon name="trending-up-outline"></ion-icon> Modelo predictivo</div>
-          <h1>Recomendaciones de inversión</h1>
+          <h1>Pronóstico de demanda y compras</h1>
           <p class="text-muted">
             Pronostica la demanda de cada prenda con lo vendido en el e-commerce y en la tienda física, y la cruza con el
             stock, el precio y el costo para decir qué comprar, qué no reponer y dónde está creciendo la demanda.

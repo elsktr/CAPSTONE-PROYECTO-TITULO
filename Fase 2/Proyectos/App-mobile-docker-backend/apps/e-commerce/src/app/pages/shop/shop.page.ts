@@ -9,19 +9,23 @@ import { ProductsService } from '../../services/products.service';
 import { CartService } from '../../services/cart.service';
 import { ToastService } from '../../services/toast.service';
 import { AuthService } from '../../services/auth.service';
-import { Product, formatCLP, usePlaceholder } from '../../data/models';
+import { OffersCarouselComponent } from '../../components/offers-carousel.component';
+import { Product, discountPercent, formatCLP, formatDay, usePlaceholder } from '../../data/models';
 import { cleanQuery, matchesQuery } from '../../data/search';
 import { tipoDePrenda } from '../../data/probador';
 import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.component';
 
+/** Productos que la portada muestra de cada categoría; el resto se ve entrando a ella. */
+const PRODUCTS_PER_CATEGORY = 4;
+
 @Component({
   selector: 'app-shop',
   standalone: true,
-  imports: [CommonModule, RouterLink, IonContent, IonButton, IonIcon, IonGrid, IonRow, IonCol],
+  imports: [CommonModule, RouterLink, IonContent, IonButton, IonIcon, IonGrid, IonRow, IonCol, OffersCarouselComponent],
   template: `
     <ion-content class="rockstar-content" [fullscreen]="true">
       <!-- Hero: solo en la portada, sin filtros -->
-      <div class="hero" *ngIf="!hasFilters()">
+      <div class="hero" [class.with-tour]="products.tourShirts().length > 0" *ngIf="!hasFilters()">
         <div class="hero-glow"></div>
         <div class="hero-content">
           <div class="section-title">Nueva colección · 2026</div>
@@ -31,7 +35,26 @@ import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.com
             pesadas, amplificadores al máximo y cero compromisos.
           </p>
         </div>
+
+        <!-- Poleras de las bandas con concierto en Chile dentro de los próximos doce meses -->
+        <div class="tour" *ngIf="products.tourShirts().length > 0">
+          <div class="tour-title">Vienen a Chile · llega al concierto con su polera</div>
+          <div class="tour-strip">
+            <a class="tour-card" *ngFor="let s of products.tourShirts()" [routerLink]="['/producto', s.productId]">
+              <img [src]="s.image" [alt]="s.name" loading="lazy" (error)="usePlaceholder($event)" />
+              <div class="tour-info">
+                <div class="tour-band">{{ s.band }}</div>
+                <div class="tour-name">{{ s.name }}</div>
+                <div class="tour-date">{{ formatDay(s.date) }}{{ s.place ? ' · ' + s.place : '' }}</div>
+                <div class="tour-price">{{ formatCLP(s.price) }}</div>
+              </div>
+            </a>
+          </div>
+        </div>
       </div>
+
+      <!-- Ofertas del mes: también solo en la portada, y solo si este mes hay alguna -->
+      <app-offers-carousel *ngIf="!hasFilters() && products.offers().length > 0" [offers]="products.offers()"></app-offers-carousel>
 
       <!-- Lo elegido en la barra de navegación -->
       <div class="selection" *ngIf="hasFilters()">
@@ -46,17 +69,44 @@ import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.com
         <a class="clear" routerLink="/shop">Quitar filtros</a>
       </div>
 
-      <!-- Products grid -->
-      <ion-grid class="products-grid">
+      <!-- Portada: una sección por categoría, con unos pocos productos y el enlace a todos -->
+      <ng-container *ngIf="!hasFilters()">
+        <section class="category" *ngFor="let section of sections()">
+          <div class="category-head">
+            <h2>{{ section.name }}</h2>
+            <a class="clear" routerLink="/shop" [queryParams]="{ categoria: section.name }">Ver todos ({{ section.total }})</a>
+          </div>
+          <ion-grid class="products-grid">
+            <ion-row>
+              <ion-col size="6" size-md="3" *ngFor="let p of section.products">
+                <ng-container *ngTemplateOutlet="card; context: { $implicit: p }"></ng-container>
+              </ion-col>
+            </ion-row>
+          </ion-grid>
+        </section>
+      </ng-container>
+
+      <!-- Con una categoría, banda, talla o búsqueda: todo lo que calza -->
+      <ion-grid class="products-grid" *ngIf="hasFilters()">
         <ion-row>
           <ion-col size="6" size-md="4" size-lg="3" *ngFor="let p of filtered()">
+            <ng-container *ngTemplateOutlet="card; context: { $implicit: p }"></ng-container>
+          </ion-col>
+        </ion-row>
+      </ion-grid>
+
+      <ng-template #card let-p>
             <div class="product-card" [class.is-anime]="p.category === 'Anime'">
+              <!-- El botón Probar va fuera del enlace: un botón no puede ir dentro de un enlace. -->
               <div class="product-img-wrap">
-                <img [src]="p.image" [alt]="p.name" class="product-card-img" loading="lazy" (error)="usePlaceholder($event)" />
-                <div class="badge" [class.badge-anime]="p.category === 'Anime'" [class.badge-rock]="p.category !== 'Anime'">
-                  {{ p.category }}
-                </div>
-                <div class="badge badge-low-stock" *ngIf="p.stock <= 3">Últimas unidades</div>
+                <a class="product-img-link" [routerLink]="['/producto', p.productId]" [queryParams]="{ talla: p.size }" [attr.aria-label]="'Ver ' + p.name">
+                  <img [src]="p.image" [alt]="p.name" class="product-card-img" loading="lazy" (error)="usePlaceholder($event)" />
+                  <div class="badge" [class.badge-anime]="p.category === 'Anime'" [class.badge-rock]="p.category !== 'Anime'">
+                    {{ p.category }}
+                  </div>
+                  <div class="badge badge-low-stock" *ngIf="p.stock <= 3">Últimas unidades</div>
+                  <div class="badge badge-offer" *ngIf="p.listPrice">Oferta -{{ discountPercent(p.price, p.listPrice) }}%</div>
+                </a>
                 <button
                   *ngIf="!isAdmin() && sePuedeProbar(p)"
                   type="button"
@@ -68,10 +118,13 @@ import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.com
                 </button>
               </div>
               <div class="product-body">
-                <h3>{{ p.name }}</h3>
+                <h3><a [routerLink]="['/producto', p.productId]" [queryParams]="{ talla: p.size }">{{ p.name }}</a></h3>
                 <div class="detail">{{ p.band ? p.band + ' · ' : '' }}{{ p.color }}</div>
                 <div class="row-between">
-                  <span class="price">{{ formatCLP(p.price) }}</span>
+                  <span class="price">
+                    {{ formatCLP(p.price) }}
+                    <s class="list-price" *ngIf="p.listPrice">{{ formatCLP(p.listPrice) }}</s>
+                  </span>
                   <span class="size">Talla {{ p.size }}</span>
                 </div>
                 <div class="stock">{{ p.stock > 0 ? 'Stock disponible: ' + p.stock : 'Agotado' }}</div>
@@ -88,9 +141,7 @@ import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.com
                 </ion-button>
               </div>
             </div>
-          </ion-col>
-        </ion-row>
-      </ion-grid>
+      </ng-template>
 
       <div class="empty" *ngIf="products.error() as message">
         <p>{{ message }}</p>
@@ -136,6 +187,32 @@ import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.com
       color: var(--text-muted);
       max-width: 540px;
     }
+    .tour { position: relative; min-width: 0; margin-top: 20px; }
+    .tour-title {
+      margin-bottom: 10px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.2em;
+      color: var(--text-muted);
+    }
+    .tour-strip { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+    .tour-card {
+      flex: 0 0 132px;
+      display: flex; flex-direction: column;
+      background: rgba(9, 9, 11, 0.6); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+      color: inherit; text-decoration: none; transition: border-color 0.2s;
+    }
+    .tour-card:hover, .tour-card:focus-visible { border-color: var(--accent); outline: none; }
+    .tour-card img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #18181b; }
+    .tour-info { padding: 8px 10px 10px; }
+    .tour-band { font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; }
+    .tour-name { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tour-date { margin-top: 4px; font-size: 10px; font-weight: 700; line-height: 1.3; color: #fca5a5; }
+    .tour-price { margin-top: 4px; font-size: 13px; font-weight: 900; }
+    @media (min-width: 900px) {
+      /* Con espacio a lo ancho, las poleras van al lado del texto del cartel. */
+      .hero.with-tour { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 32px; align-items: center; }
+      .hero.with-tour .tour { margin-top: 0; }
+      .tour-card { flex-basis: 150px; }
+    }
     .filters {
       padding: 0 16px;
       display: flex;
@@ -157,6 +234,10 @@ import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.com
     }
     .clear:hover { border-color: var(--accent); color: #fff; }
     .products-grid { padding: 16px; }
+    .category-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 24px 16px 0; }
+    .category-head h2 { margin: 0; font-size: 20px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; }
+    .category .products-grid { padding-top: 8px; padding-bottom: 0; }
+    .category:last-of-type { padding-bottom: 16px; }
     .product-card {
       background: var(--bg-card);
       border: 1px solid var(--border);
@@ -173,6 +254,7 @@ import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.com
     }
     .product-card:hover { border-color: var(--accent); }
     .product-img-wrap {
+      display: block;
       position: relative;
       aspect-ratio: 4/5;
       background: #18181b;
@@ -206,7 +288,20 @@ import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.com
       background: var(--accent);
       color: #fff;
     }
+    .product-img-link { display: block; width: 100%; height: 100%; }
+    /* Abajo a la derecha: arriba a la derecha va el botón Probar. */
+    .badge-offer {
+      left: auto;
+      right: 10px;
+      top: auto;
+      bottom: 10px;
+      background: #fff;
+      color: var(--accent);
+    }
+    .list-price { display: block; font-size: 11px; font-weight: 400; color: var(--text-faint); }
     .product-body { padding: 12px; display: flex; flex-direction: column; flex: 1; }
+    .product-body h3 a { color: inherit; text-decoration: none; }
+    .product-body h3 a:hover, .product-body h3 a:focus-visible { color: var(--accent-hover); }
     .product-body h3 {
       font-size: 13px;
       font-weight: 700;
@@ -216,7 +311,7 @@ import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.com
     }
     .row-between { display: flex; justify-content: space-between; align-items: center; }
     .price { font-size: 16px; font-weight: 900; }
-    .size { font-size: 10px; color: var(--text-faint); background: #18181b; padding: 2px 6px; border-radius: 4px; }
+    .size { flex: none; font-size: 10px; color: var(--text-faint); background: #18181b; padding: 2px 6px; border-radius: 4px; }
     .stock { font-size: 11px; color: var(--text-faint); margin: 4px 0 8px; }
     .detail { font-size: 11px; color: var(--text-faint); margin: -4px 0 8px; }
     .add-btn {
@@ -299,6 +394,25 @@ export class ShopPage {
     const modal = await this.modales.create({ component: ProbadorComponent, componentProps: { prueba }, cssClass: 'modal-probador' });
     await modal.present();
   }
+  /**
+   * La portada: cada categoría con sus primeros productos. Un producto aparece una sola
+   * vez, con una talla que tenga unidades, y los agotados van al final.
+   */
+  sections = computed(() =>
+    this.products.categories().map((name) => {
+      const shown = new Map<number, Product>();
+      for (const product of this.products.products()) {
+        const current = shown.get(product.productId);
+        if (product.category === name && (!current || (current.stock <= 0 && product.stock > 0))) {
+          shown.set(product.productId, product);
+        }
+      }
+      const all = [...shown.values()];
+      const available = all.filter((p) => p.stock > 0);
+      const soldOut = all.filter((p) => p.stock <= 0);
+      return { name, total: all.length, products: [...available, ...soldOut].slice(0, PRODUCTS_PER_CATEGORY) };
+    }),
+  );
 
   constructor() {
     addIcons({ 'add-outline': addOutline, 'body-outline': bodyOutline });
@@ -307,6 +421,8 @@ export class ShopPage {
   }
 
   formatCLP = formatCLP;
+  discountPercent = discountPercent;
+  formatDay = formatDay;
   usePlaceholder = usePlaceholder;
 
   addToCart(p: Product) {

@@ -13,6 +13,7 @@ import type {
 
 import { ErrorDeNegocio, cuerpoComo, esEnteroPositivo, exigir, noEncontrado, texto } from '../comun/errores.js';
 import { BaseDeDatos, type Ejecutor } from '../db/base-de-datos.js';
+import { OFERTA_DEL_MES } from '../inventario/consultas.js';
 import { StockService, totalDe } from '../inventario/stock.service.js';
 import { FletesService } from '../logistica/fletes.service.js';
 import { PASARELA, type PagoResuelto, type Pasarela } from '../pagos/pasarela.js';
@@ -177,9 +178,12 @@ export class ComprasService implements OnModuleInit, OnModuleDestroy {
     const ids = lineas.map((linea) => linea.idVariante);
     const saldos = await this.stock.bloquear(tx, ids);
     const filas = await tx.consultar<DatosDeVariante>(
-      `SELECT v.id_variante, p.nombre AS producto, t.nombre AS talla, p.precio, p.costo_compra
+      // Se cobra el precio de oferta si el producto está en oferta este mes; sin precio normal no se vende.
+      `SELECT v.id_variante, p.nombre AS producto, t.nombre AS talla,
+              CASE WHEN p.precio IS NOT NULL THEN COALESCE(o.precio_oferta, p.precio) END AS precio, p.costo_compra
        FROM inventario.variantes v
        JOIN inventario.productos p ON p.id_producto = v.id_producto
+       ${OFERTA_DEL_MES}
        JOIN inventario.tallas t ON t.id_talla = v.id_talla
        WHERE v.id_variante = ANY($1::int[])`,
       [ids],

@@ -59,7 +59,7 @@ describe('POS - Cobro en efectivo', () => {
     cy.wait('@login');
     
     cy.contains('Medio de pago').should('be.visible');
-    cy.get('ion-radio[value="EFECTIVO"]').click();
+    cy.get('[data-medio="EFECTIVO"]').click();
     cy.contains('Confirmar y pagar').click();
     
     cy.wait('@venta').then(({ request }) => {
@@ -95,7 +95,7 @@ describe('POS - Cobro en efectivo', () => {
     cy.get('.scan-input').type('POL-NEG-M{enter}');
     cy.get('ion-button.cobrar-button').click();
     cy.get('.cobro-cliente').should('contain', 'Venta sin cliente');
-    cy.get('ion-radio[value="EFECTIVO"]').click();
+    cy.get('[data-medio="EFECTIVO"]').click();
     cy.contains('Confirmar y pagar').click();
 
     cy.wait('@venta').then(({ request }) => {

@@ -4,6 +4,7 @@ import type {
   BandaCatalogo,
   Busqueda,
   Categoria,
+  GuiaDeTallas,
   Movimiento,
   ResultadoMovimientos,
   Usuario,
@@ -46,7 +47,7 @@ export class InventarioController {
     return articulosDeCatalogo(this.db);
   }
 
-  /** Las bandas con la dirección de su foto, para la página de bandas de la tienda. */
+  /** Las bandas con la dirección de su foto y su próximo concierto en Chile, para la tienda. */
   @Get('catalogo/bandas')
   @Publica()
   bandasDeCatalogo(): Promise<BandaCatalogo[]> {
@@ -64,6 +65,13 @@ export class InventarioController {
   async imagenDeBanda(@Param('id', ParseIntPipe) id: number): Promise<StreamableFile> {
     const { bytes, tipo } = await this.bandasConFoto.imagen(id);
     return new StreamableFile(bytes, { type: tipo, length: bytes.length });
+  }
+
+  /** Cuánto mide cada talla de cada categoría, para la página de un producto. */
+  @Get('catalogo/guias-tallas')
+  @Publica()
+  guiasDeTallas(): Promise<GuiaDeTallas[]> {
+    return this.catalogos.guiasDeTallas();
   }
 
   // --- Consulta de stock ---
@@ -120,6 +128,13 @@ export class InventarioController {
     return this.bandasConFoto.guardarImagen(cuerpo);
   }
 
+  /** Registra o quita el próximo concierto de una banda en Chile; si la banda no existe, la registra. */
+  @Put('bandas/concierto')
+  @Roles('BODEGA', 'GERENTE')
+  guardarConciertoDeBanda(@Body() cuerpo: unknown): Promise<BandaCatalogo> {
+    return this.bandasConFoto.guardarConcierto(cuerpo);
+  }
+
   @Get('colores')
   @Roles('BODEGA', 'GERENTE')
   colores(): Promise<string[]> {
@@ -144,6 +159,13 @@ export class InventarioController {
     return this.catalogos.agregarCategoria(nombre);
   }
 
+  /** Guarda las medidas de las tallas de una categoría. */
+  @Put('categorias/medidas')
+  @Roles('BODEGA', 'GERENTE')
+  guardarMedidas(@Body() cuerpo: unknown): Promise<GuiaDeTallas> {
+    return this.catalogos.guardarMedidas(cuerpo);
+  }
+
   // --- Productos y movimientos ---
 
   @Post('productos')
@@ -159,11 +181,11 @@ export class InventarioController {
     return variantesDeGestion(this.db);
   }
 
-  /** El precio lo define el Gerente (matriz de permisos del diseño). */
+  /** El precio, la oferta del mes, la descripción y el tipo de estampado los define el Gerente (matriz de permisos del diseño). */
   @Patch('productos/:id')
   @Roles('GERENTE')
-  editarProducto(@Param('id', ParseIntPipe) id: number, @Body() cuerpo: unknown): Promise<VarianteGestion[]> {
-    return this.productos.editar(id, cuerpo);
+  editarProducto(@Param('id', ParseIntPipe) id: number, @Body() cuerpo: unknown, @UsuarioActual() usuario: Usuario): Promise<VarianteGestion[]> {
+    return this.productos.editar(id, cuerpo, usuario);
   }
 
   /**

@@ -51,7 +51,7 @@ import { Espacio, agruparEspacios, filtrarEspacios } from './espacios';
         <ion-buttons slot="start">
           <ion-back-button defaultHref="/inicio"></ion-back-button>
         </ion-buttons>
-        <ion-title>Espacios de bodega</ion-title>
+        <ion-title>Ubicaciones</ion-title>
       </ion-toolbar>
     </ion-header>
     <ion-content>

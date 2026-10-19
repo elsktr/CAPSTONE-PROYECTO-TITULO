@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import type { Categoria } from '@rockstar/contracts';
+import type { Categoria, GuiaDeTallas, MedidaDeTalla, MedidasDeCategoriaRequest } from '@rockstar/contracts';
 
-import { exigir, texto } from '../comun/errores.js';
+import { cuerpoComo, esEnteroPositivo, exigir, noEncontrado, texto } from '../comun/errores.js';
 import { claveDe, ordenar } from '../comun/texto.js';
 import { BaseDeDatos, type Ejecutor } from '../db/base-de-datos.js';
 import { elegirZona } from './ubicaciones.js';
@@ -12,6 +12,9 @@ export type Catalogo = keyof typeof CATALOGOS;
 
 /** Tallas con que nace una categoría nueva. */
 const TALLAS_POR_DEFECTO = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+
+/** Tope de una medida de la guía de tallas: ninguna prenda mide más. */
+const MAXIMO_CM = 300;
 
 /** Número arbitrario y fijo: serializa la creación de categorías, que deben repartirse las zonas de bodega. */
 const CANDADO_CATEGORIAS = 7_301_002;
@@ -122,6 +125,50 @@ export class CatalogosService {
       await this.admitirTalla(tx, categoria!.id, (await this.incorporar(tx, 'tallas', talla)).id);
     }
     return categoria!;
+  }
+
+  /** La guía de tallas de cada categoría, o solo la de una, con las tallas en su orden. */
+  async guiasDeTallas(ejecutor: Ejecutor = this.db, idCategoria: number | null = null): Promise<GuiaDeTallas[]> {
+    const filas = await ejecutor.consultar<{ categoria: string; tallas: MedidaDeTalla[] }>(
+      `SELECT c.nombre AS categoria,
+              json_agg(json_build_object('talla', t.nombre, 'anchoCm', ct.ancho_cm, 'largoCm', ct.largo_cm) ORDER BY ct.orden) AS tallas
+       FROM inventario.categorias c
+       JOIN inventario.categorias_tallas ct ON ct.id_categoria = c.id_categoria
+       JOIN inventario.tallas t ON t.id_talla = ct.id_talla
+       WHERE $1::int IS NULL OR c.id_categoria = $1
+       GROUP BY c.id_categoria`,
+      [idCategoria],
+    );
+    return filas.sort((a, b) => a.categoria.localeCompare(b.categoria, 'es'));
+  }
+
+  /** Guarda las medidas de las tallas enviadas; las demás tallas de la categoría quedan como están. */
+  guardarMedidas(cuerpo: unknown): Promise<GuiaDeTallas> {
+    const datos = cuerpoComo<MedidasDeCategoriaRequest>(cuerpo);
+    exigir(Array.isArray(datos.tallas) && datos.tallas.length > 0, 'Faltan las medidas de las tallas.');
+    const medida = (valor: unknown) => valor === null || valor === undefined || (esEnteroPositivo(valor) && valor <= MAXIMO_CM);
+    for (const talla of datos.tallas as Partial<MedidaDeTalla>[]) {
+      exigir(typeof talla === 'object' && talla !== null && texto(talla.talla) !== '', 'Cada medida necesita su talla.');
+      exigir(medida(talla.anchoCm) && medida(talla.largoCm), `Las medidas van en centímetros enteros, entre 1 y ${MAXIMO_CM}.`);
+    }
+
+    return this.db.transaccion(async (tx) => {
+      const [categoria] = await tx.consultar<{ id: number }>('SELECT id_categoria AS id FROM inventario.categorias WHERE clave = $1', [claveDe(texto(datos.categoria))]);
+      if (!categoria) {
+        throw noEncontrado('La categoría no existe.');
+      }
+      for (const talla of datos.tallas!) {
+        const [guardada] = await tx.consultar(
+          `UPDATE inventario.categorias_tallas ct SET ancho_cm = $3, largo_cm = $4
+           FROM inventario.tallas t
+           WHERE t.id_talla = ct.id_talla AND ct.id_categoria = $1 AND t.clave = $2
+           RETURNING ct.id_talla`,
+          [categoria.id, claveDe(texto(talla.talla)), talla.anchoCm ?? null, talla.largoCm ?? null],
+        );
+        exigir(guardada !== undefined, `La categoría no admite la talla ${texto(talla.talla)}.`);
+      }
+      return (await this.guiasDeTallas(tx, categoria.id))[0]!;
+    });
   }
 
   /** Agrega la talla a las que admite la categoría, al final; no hace nada si ya la admite. */

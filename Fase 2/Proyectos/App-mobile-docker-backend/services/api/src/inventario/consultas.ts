@@ -17,11 +17,19 @@ import { ID_UBICACION } from './ubicaciones.js';
  */
 export const RESERVA_VIGENTE = `(r.estado = 'CONFIRMADA' OR (r.estado = 'ACTIVA' AND r.expira_en > now()))`;
 
+/** Primer día del mes en curso en Chile: una oferta rige durante un mes calendario. */
+export const MES_ACTUAL = `date_trunc('month', now() AT TIME ZONE 'America/Santiago')::date`;
+
+/** Une al producto `p` su oferta de este mes, si tiene una, con el alias `o`. */
+export const OFERTA_DEL_MES = `LEFT JOIN inventario.ofertas o ON o.id_producto = p.id_producto AND o.mes = ${MES_ACTUAL}`;
+
 interface FilaVariante {
   id_variante: number;
   id_producto: number;
   precio: number | null;
+  precio_oferta: number | null;
   descripcion: string | null;
+  tipo_estampado: string | null;
   sku: string;
   codigo: string;
   producto: string;
@@ -38,7 +46,7 @@ interface FilaVariante {
 }
 
 const SELECCION_VARIANTE = `
-  SELECT v.id_variante, p.id_producto, p.precio, p.descripcion,
+  SELECT v.id_variante, p.id_producto, p.precio, o.precio_oferta, p.descripcion, p.tipo_estampado,
          v.sku, v.codigo, p.nombre AS producto, c.nombre AS categoria, b.nombre AS banda,
          p.imagen_url, p.codigo_ubicacion, t.nombre AS talla, co.nombre AS color,
          (v.activo AND p.activo) AS activo,
@@ -50,6 +58,7 @@ const SELECCION_VARIANTE = `
                    WHERE r.id_variante = v.id_variante AND ${RESERVA_VIGENTE}), 0)::int AS reservado
   FROM inventario.variantes v
   JOIN inventario.productos p ON p.id_producto = v.id_producto
+  ${OFERTA_DEL_MES}
   JOIN inventario.categorias c ON c.id_categoria = p.id_categoria
   LEFT JOIN inventario.bandas b ON b.id_banda = p.id_banda
   JOIN inventario.tallas t ON t.id_talla = v.id_talla
@@ -79,7 +88,7 @@ function aVarianteStock(fila: FilaVariante): VarianteStock {
 
 /**
  * Variantes con su stock, ordenadas por identificador. `condicion` es un `WHERE` sobre
- * los alias de la selección (`v`, `p`, `c`, `b`, `t`, `co`) con sus parámetros.
+ * los alias de la selección (`v`, `p`, `o`, `c`, `b`, `t`, `co`) con sus parámetros.
  */
 export async function variantesConStock(ejecutor: Ejecutor, condicion = '', parametros: unknown[] = []): Promise<VarianteStock[]> {
   const filas = await ejecutor.consultar<FilaVariante>(`${SELECCION_VARIANTE} ${condicion} ORDER BY v.id_variante`, parametros);
@@ -93,13 +102,16 @@ export async function variantesDeGestion(ejecutor: Ejecutor, condicion = '', par
     ...aVarianteStock(fila),
     idProducto: fila.id_producto,
     precio: fila.precio,
+    precioOferta: fila.precio_oferta,
     descripcion: fila.descripcion,
+    tipoEstampado: fila.tipo_estampado,
   }));
 }
 
 /**
  * Lo que la tienda web ofrece: variantes activas de productos con precio, por nombre de
- * producto. No incluye ubicaciones ni reservas, que son datos internos.
+ * producto. No incluye ubicaciones ni reservas, que son datos internos. El precio es el
+ * que se cobra: el de oferta si el producto está en oferta este mes.
  */
 export async function articulosDeCatalogo(ejecutor: Ejecutor): Promise<ArticuloCatalogo[]> {
   const filas = await ejecutor.consultar<FilaVariante>(
@@ -114,8 +126,10 @@ export async function articulosDeCatalogo(ejecutor: Ejecutor): Promise<ArticuloC
     banda: fila.banda,
     talla: fila.talla,
     color: fila.color,
-    precio: fila.precio!,
+    precio: fila.precio_oferta ?? fila.precio!,
+    precioNormal: fila.precio_oferta === null ? null : fila.precio!,
     descripcion: fila.descripcion,
+    tipoEstampado: fila.tipo_estampado,
     imagenUrl: fila.imagen_url,
     disponible: Math.max(0, fila.bodega + fila.sala - fila.reservado),
   }));

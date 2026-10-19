@@ -6,7 +6,7 @@ import { IonContent, IonButton, IonItem, IonInput, IonIcon } from '@ionic/angula
 import { addIcons } from 'ionicons';
 import { bagHandleOutline, personAddOutline, shieldCheckmarkOutline } from 'ionicons/icons';
 import { errorMessage } from '../../core/api';
-import { CurrentUser } from '../../data/models';
+import { CurrentUser, PHONE_DIGITS, PHONE_PREFIX, phoneDigits } from '../../data/models';
 import { AuthService } from '../../services/auth.service';
 import { ToastService } from '../../services/toast.service';
 
@@ -69,6 +69,26 @@ type Mode = 'choose' | 'client' | 'register' | 'admin';
               <label class="lbl">Correo</label>
               <ion-item lines="none" class="input-item">
                 <ion-input [(ngModel)]="email" name="email" type="email" autocomplete="username" placeholder="tu@correo.cl"></ion-input>
+              </ion-item>
+              <label class="lbl">Teléfono</label>
+              <ion-item lines="none" class="input-item">
+                <!-- El prefijo de Chile va fijo: se escribe solo el número, y así se guarda siempre completo. -->
+                <span class="prefix" slot="start" aria-hidden="true">{{ phonePrefix }}</span>
+                <ion-input
+                  #phoneInput
+                  [value]="phone"
+                  name="phone"
+                  type="tel"
+                  inputmode="numeric"
+                  autocomplete="tel-national"
+                  placeholder="9 1234 5678"
+                  [attr.aria-label]="'Teléfono, sin el prefijo ' + phonePrefix"
+                  (ionInput)="onPhoneInput($event, phoneInput)"
+                ></ion-input>
+              </ion-item>
+              <label class="lbl">Dirección</label>
+              <ion-item lines="none" class="input-item">
+                <ion-input [(ngModel)]="address" name="address" autocomplete="street-address" maxlength="200" placeholder="Calle, número, depto. y comuna"></ion-input>
               </ion-item>
               <label class="lbl">Contraseña</label>
               <ion-item lines="none" class="input-item">
@@ -217,6 +237,7 @@ type Mode = 'choose' | 'client' | 'register' | 'admin';
       --padding-start: 12px;
       margin-top: 4px;
     }
+    .prefix { margin-right: 8px; padding-right: 8px; border-right: 1px solid var(--border); color: var(--text-muted); font-weight: 700; }
     .error-msg {
       margin: 8px 0 0;
       padding: 8px 12px;
@@ -238,7 +259,11 @@ export class EntryPage {
   mode = signal<Mode>('choose');
   name = '';
   email = '';
+  /** Dígitos del teléfono, sin el prefijo. */
+  phone = '';
+  address = '';
   password = '';
+  phonePrefix = PHONE_PREFIX;
   error = signal<string>('');
   busy = signal(false);
 
@@ -301,16 +326,26 @@ export class EntryPage {
     }
   }
 
+  /** Deja en el campo solo los dígitos del número: ni letras, ni signos, ni el prefijo repetido. */
+  onPhoneInput(event: Event, input: IonInput) {
+    this.phone = phoneDigits(String((event as CustomEvent<{ value?: string | null }>).detail.value ?? ''));
+    input.value = this.phone;
+  }
+
   async register() {
     if (this.busy()) return;
-    if (!this.name.trim() || !this.email.trim() || !this.password) {
-      this.error.set('Completa tu nombre, tu correo y una contraseña.');
+    if (!this.name.trim() || !this.email.trim() || !this.address.trim() || !this.password) {
+      this.error.set('Completa tu nombre, tu correo, tu teléfono, tu dirección y una contraseña.');
+      return;
+    }
+    if (this.phone.length !== PHONE_DIGITS) {
+      this.error.set(`Escribe los ${PHONE_DIGITS} dígitos de tu teléfono, sin el ${PHONE_PREFIX}.`);
       return;
     }
     this.busy.set(true);
     this.error.set('');
     try {
-      const user = await this.auth.register(this.name.trim(), this.email.trim(), this.password);
+      const user = await this.auth.register(this.name.trim(), this.email.trim(), this.password, `${PHONE_PREFIX}${this.phone}`, this.address.trim());
       this.toast.show(`Cuenta creada. Bienvenido, ${user.name}.`);
       this.enter(user);
     } catch (error) {

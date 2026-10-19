@@ -29,7 +29,7 @@ import { InventarioApi } from '../inventario/inventario.api';
         <ion-buttons slot="start">
           <ion-back-button defaultHref="/inicio"></ion-back-button>
         </ion-buttons>
-        <ion-title>Consultar producto</ion-title>
+        <ion-title>Buscar producto</ion-title>
       </ion-toolbar>
     </ion-header>
     <ion-content>

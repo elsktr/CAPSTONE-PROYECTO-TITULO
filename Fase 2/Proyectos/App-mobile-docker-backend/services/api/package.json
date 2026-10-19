@@ -9,13 +9,16 @@
     "start": "node dist/services/api/src/main.js",
     "local": "npm run build && node test/entorno-local.mjs",
     "semilla:bandas": "node scripts/cargar-bandas.mjs",
+    "semilla:prendas": "node scripts/cargar-prendas.mjs",
     "semilla:historial": "node scripts/sembrar-historial.mjs",
     "semilla:historial:quitar": "node scripts/sembrar-historial.mjs --quitar",
+    "ventas:ejemplo": "node scripts/generar-ventas-ejemplo.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --config vitest.config.mts",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@nestjs/common": "^12.1.2",
     "@nestjs/core": "^12.1.2",
     "@nestjs/platform-express": "^12.1.2",

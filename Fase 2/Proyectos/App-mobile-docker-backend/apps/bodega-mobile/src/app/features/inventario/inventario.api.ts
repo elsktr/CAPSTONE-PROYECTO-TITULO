@@ -1,17 +1,12 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import type {
-  AjusteRequest,
-  Busqueda,
-  BusquedaRequest,
   Categoria,
-  CierreBusquedaRequest,
   IngresoRequest,
   MermaRequest,
   NombreRequest,
   ProductoNuevoRequest,
   ResultadoMovimientos,
-  TraspasoRequest,
   VarianteEdicionRequest,
   VarianteStock,
 } from '@rockstar/contracts';
@@ -75,21 +70,5 @@ export class InventarioApi {
 
   registrarMerma(datos: MermaRequest): Observable<ResultadoMovimientos> {
     return this.http.post<ResultadoMovimientos>(`${this.url}/movimientos/mermas`, datos);
-  }
-
-  registrarTraspaso(datos: TraspasoRequest): Observable<ResultadoMovimientos> {
-    return this.http.post<ResultadoMovimientos>(`${this.url}/movimientos/traspasos`, datos);
-  }
-
-  registrarAjuste(datos: AjusteRequest): Observable<ResultadoMovimientos> {
-    return this.http.post<ResultadoMovimientos>(`${this.url}/movimientos/ajustes`, datos);
-  }
-
-  iniciarBusqueda(datos: BusquedaRequest): Observable<Busqueda> {
-    return this.http.post<Busqueda>(`${this.url}/busquedas`, datos);
-  }
-
-  cerrarBusqueda(idBusqueda: number, datos: CierreBusquedaRequest): Observable<Busqueda> {
-    return this.http.patch<Busqueda>(`${this.url}/busquedas/${idBusqueda}`, datos);
   }
 }

@@ -3,7 +3,6 @@ import { NavController } from '@ionic/angular';
 
 import { ImagenesService } from '../../shared/imagenes.service';
 import { EntornoDePrueba, configurarEntorno } from '../../testing/entorno';
-import { BusquedaPage } from '../busqueda/busqueda.page';
 import { ProductoNuevoPage } from './producto-nuevo.page';
 
 const FOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
@@ -205,13 +204,10 @@ describe('ProductoNuevoPage', () => {
     expect(pagina.avisoBanda()).toBe('Banda "Motörhead" guardada.');
     expect(pagina.creada()).toBeNull();
 
-    // Otra pantalla la ve aunque no exista ningún producto de esa banda.
-    const busqueda = TestBed.createComponent(BusquedaPage).componentInstance;
-    await busqueda.cargar();
-    expect(busqueda.bandas()).toContain('Motörhead');
-    busqueda.seleccionarBanda('Motörhead');
-    expect(busqueda.grupos()).toEqual([]);
-    busqueda.ngOnDestroy();
+    // Quedó en el servidor: otra pantalla la ve aunque no exista ningún producto de esa banda.
+    const otra = TestBed.createComponent(ProductoNuevoPage).componentInstance;
+    await otra.cargarSugerencias();
+    expect(otra.bandas()).toContain('Motörhead');
   });
 
   it('registra una categoría nueva de inmediato', async () => {

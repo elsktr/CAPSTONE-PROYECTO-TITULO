@@ -1,6 +1,6 @@
 # Rockstar Bodega
 
-App móvil de bodega (Ionic Angular + Capacitor): consulta de stock, ingreso de mercadería, mermas, traspasos, conteos y búsqueda de prendas, con escaneo de QR y códigos de barras.
+App móvil de bodega (Ionic Angular + Capacitor): los envíos del e-commerce y cuatro operaciones (ingresar producto, buscar producto, ubicaciones, que son los racks de la bodega, e ingreso de merma), con escaneo de QR y códigos de barras.
 
 ## Ejecutar
 
@@ -33,7 +33,7 @@ Cuentas del backend simulado:
 | `bodega@rockstar.cl` | `bodega123` | Bodega (puede entrar) |
 | `vendedor@rockstar.cl` | `vendedor123` | Vendedor (la app lo rechaza) |
 
-Productos de ejemplo: SKU `RS-0001` a `RS-0008`, con códigos de barras `7800000000001` a `7800000000008`. `RS-0002` tiene unidades reservadas y `RS-0006` está desactivado. Varios pertenecen a una banda (Misfits, Metallica, Iron Maiden, AC/DC) para probar el filtro de "Buscar prenda".
+Productos de ejemplo: SKU `RS-0001` a `RS-0008`, con códigos de barras `7800000000001` a `7800000000008`. `RS-0002` tiene unidades reservadas y `RS-0006` está desactivado. Varios pertenecen a una banda (Misfits, Metallica, Iron Maiden, AC/DC).
 
 ## Escáner
 

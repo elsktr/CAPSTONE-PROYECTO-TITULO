@@ -1448,3 +1448,247 @@ ion-toast::part(container) {
   }
   .login-brand-icon { animation: none !important; }
 }
+
+/* Medio de pago: efectivo, tarjeta o transferencia */
+.formas-pago {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.forma-pago {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--ion-color-step-250, #3f3f46);
+  background: var(--ion-item-background);
+  color: var(--ion-text-color);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.forma-pago ion-icon {
+  font-size: 1.6rem;
+  color: var(--ion-color-medium);
+}
+
+.forma-pago.elegida {
+  border-color: var(--ion-color-primary);
+  box-shadow: 0 0 0 1px var(--ion-color-primary);
+}
+
+.forma-pago.elegida ion-icon {
+  color: var(--ion-color-primary);
+}
+
+.detalle-pago {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--ion-item-background);
+}
+
+.detalle-pago ion-item {
+  --background: transparent;
+}
+
+.campo-pago {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ion-color-medium);
+}
+
+.campo-pago:first-child {
+  margin-top: 0;
+}
+
+.campo-pago input,
+.campo-pago textarea {
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--ion-color-step-250, #3f3f46);
+  background: #121212;
+  color: var(--ion-text-color);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 400;
+  resize: vertical;
+}
+
+.montos-rapidos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.montos-rapidos button,
+.copiar-datos {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--ion-color-step-250, #3f3f46);
+  background: transparent;
+  color: var(--ion-text-color);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.vuelto {
+  margin: 10px 0 0;
+  font-size: 0.95rem;
+  color: var(--ion-color-medium);
+}
+
+.vuelto strong {
+  color: var(--ion-text-color);
+  font-size: 1.1rem;
+}
+
+.vuelto.falta {
+  color: var(--ion-color-danger);
+  font-weight: 600;
+}
+
+.nota-pago {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--ion-color-medium);
+}
+
+.datos-transferencia {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+}
+
+.datos-transferencia dt {
+  color: var(--ion-color-medium);
+}
+
+.datos-transferencia dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cierre de caja */
+.cierre-cargando,
+.cierre-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ion-color-medium);
+}
+
+.cierre-error {
+  color: var(--ion-color-danger);
+}
+
+.cierre-periodo {
+  margin: 0 0 8px;
+  color: var(--ion-color-medium);
+}
+
+.cierre-medios {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--ion-item-background);
+}
+
+.cierre-medios > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #27272a;
+}
+
+.cierre-medios > div:last-child {
+  border-bottom: none;
+}
+
+.cierre-medios dt span {
+  color: var(--ion-color-medium);
+}
+
+.cierre-medios dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.cierre-medios .total {
+  font-weight: 700;
+}
+
+.cierre-esperado {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin-top: 12px;
+}
+
+.cierre-esperado small {
+  grid-column: 1 / -1;
+  color: var(--ion-color-medium);
+}
+
+/* Cuadre de caja: con ícono y texto, nunca solo color */
+.cuadre {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--ion-color-step-250, #3f3f46);
+}
+
+.cuadre ion-icon {
+  font-size: 1.3rem;
+}
+
+.cuadre.cuadra {
+  border-color: #0ca30c;
+}
+
+.cuadre.cuadra ion-icon {
+  color: #0ca30c;
+}
+
+.cuadre.sobra {
+  border-color: #fab219;
+}
+
+.cuadre.sobra ion-icon {
+  color: #fab219;
+}
+
+.cuadre.falta {
+  border-color: #d03b3b;
+}
+
+.cuadre.falta ion-icon {
+  color: #d03b3b;
+}
+
+.cierre-hecho p {
+  color: var(--ion-color-medium);
+}
+
+.cerrar-caja-btn {
+  margin-top: 16px;
+}

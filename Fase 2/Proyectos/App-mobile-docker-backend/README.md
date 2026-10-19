@@ -45,6 +45,15 @@ npm run semilla:bandas
 
 Las fotos de las bandas son reales, de Wikimedia Commons con licencia libre; sus autores y licencias están en `db/semillas/bandas/CREDITOS.md`. Los productos son de muestra y su imagen es una ilustración, no una foto de la prenda.
 
+Para sumar chaquetas y pantalones (8 de cada uno, en varios colores y tallas), con la API corriendo:
+
+```
+cd services/api
+npm run semilla:prendas
+```
+
+El catálogo está en `db/semillas/prendas/catalogo.json`. Como el de bandas, se puede ejecutar más de una vez sin duplicar nada, y sus imágenes también son ilustraciones.
+
 **Recomendaciones de inversión.** En la tienda, el Gerente entra por "Acceso administrador" y, en Finanzas, abre "Recomendaciones de inversión". Es un modelo predictivo que usa las ventas del e-commerce y de la tienda física (`GET /api/v1/analitica/recomendaciones`, solo Gerente):
 
 - Pronostica la demanda semanal de cada prenda (talla y color). Para cada tipo de demanda, regular o intermitente según el criterio de Syntetos-Boylan, elige entre suavizado exponencial, Syntetos-Boylan, Holt amortiguado y media móvil: se queda con el que menos erró en semanas pasadas. El error que muestra se mide en las últimas 4 semanas, que no se usan para elegir, y se compara con repetir el promedio reciente.
@@ -60,7 +69,10 @@ npm run semilla:historial            # crea el historial de demostración
 npm run semilla:historial:quitar     # lo borra
 ```
 
-Escribe directo en PostgreSQL (`DATABASE_URL`, por defecto la base de `docker compose` en `localhost:5432`). No mueve el stock ni crea pedidos de despacho. Mientras exista, la pantalla avisa cuántas ventas de demostración incluye.
+Escribe directo en PostgreSQL (`DATABASE_URL`, por defecto la base de `docker compose` en `localhost:5432`). No mueve el stock ni crea pedidos de despacho. Las ventas de la tienda quedan en cierres de caja diarios, algunos con diferencias explicadas. Para el balance diario de Finanzas, también agrega las ventas de esta semana hasta ayer, una compra de reposición por semana y algunas mermas con su motivo; quedan como movimientos de inventario, sin cambiar el stock actual, y `semilla:historial:quitar` también las borra. Mientras exista, la pantalla avisa cuántas ventas de demostración incluye.
+
+**Cierres de caja.** Cada vendedor cierra su caja desde el POS contando el efectivo (`GET /api/v1/ventas/pos/caja`, `POST /api/v1/ventas/pos/cierres`). El Gerente ve en Finanzas & RRHH los cierres de los últimos 30 días, por medio de pago (efectivo, débito, crédito y transferencia), con lo esperado, lo contado y la diferencia, y las cajas que siguen abiertas (`GET /api/v1/ventas/cierres`).
+
 
 Un producto creado desde la bodega no aparece en la tienda hasta que el Gerente le pone precio: en la tienda, "Acceso administrador", pestaña Bodega, botón Editar.
 
@@ -75,6 +87,29 @@ docker compose logs -f api       # registro del backend
 ```
 
 Para cambiar contraseñas o puertos, copia `.env.example` a `.env`.
+
+### Asesor de inversión
+
+En la tienda, el panel Finanzas del Gerente recomienda en qué bandas y tipos de producto invertir. Lo calcula el backend con reglas fijas (`services/api/src/asesor/recomendaciones.ts`), a partir de las ventas pagadas, el stock, los conciertos registrados de las bandas y su popularidad en Deezer, que consulta por su API pública: no pide clave ni tiene costo. Si Deezer no responde, recomienda igual con los datos de la tienda.
+
+El mismo panel tiene un chat con IA, opcional y de pago: aparece solo si el backend tiene `ANTHROPIC_API_KEY` (ver `.env.example`).
+
+### Copia de demostración con ventas de ejemplo
+
+Una tienda recién abierta tiene pocas ventas para que el asesor recomiende con datos propios. Para mostrarlo con más historia sin ensuciar la base real, se levanta una copia aparte con los mismos datos y un historial de ventas inventado. En PowerShell, desde la raíz:
+
+```
+docker exec rockstar-db-1 pg_dump -U rockstar -d rockstar --no-owner | Out-File -Encoding utf8 db/respaldos/demo.sql
+$env:TIENDA_PUERTO = "8091"; $env:API_PUERTO = "3001"; $env:DB_PUERTO = "5433"
+docker compose -p rockstar-demo up -d db
+Get-Content db/respaldos/demo.sql | docker exec -i rockstar-demo-db-1 psql -q -U rockstar -d rockstar
+docker compose -p rockstar-demo up --build -d api tienda
+cd services/api
+$env:DATABASE_URL = "postgres://rockstar:rockstar_dev@localhost:5433/rockstar"
+npm run ventas:ejemplo -- --demo
+```
+
+La copia queda en http://localhost:8091, con las mismas cuentas. El generador exige `--demo` y se niega a usar el puerto de la base real; sus ventas llevan la clave `ejemplo:<n>` y `npm run ventas:ejemplo -- --demo --borrar` las quita. Para eliminar la copia completa: `docker compose -p rockstar-demo down --volumes`.
 
 ### Si Docker Desktop no arranca en Windows
 
@@ -118,15 +153,15 @@ Para que use la API real, pulsa "Modo demostración" bajo el botón de inicio de
 
 ## Etiquetas QR de los espacios de bodega
 
-La pantalla "Espacios de bodega" muestra el código QR de cada espacio con su número, por ejemplo `B-POL-03`. Para imprimirlas, abre la app en el navegador del computador (http://localhost:8080), entra a esa pantalla y usa "Imprimir etiquetas". Salen tres por fila, con línea de corte.
+La pantalla "Ubicaciones" muestra los racks de la bodega y el código QR de cada uno, con su número, por ejemplo `B-POL-03`. Para imprimirlas, abre la app en el navegador del computador (http://localhost:8080), entra a esa pantalla y usa "Imprimir etiquetas". Salen tres por fila, con línea de corte.
 
 Al escanear una etiqueta desde la app, en cualquier pantalla con el botón "Escanear código", aparecen las prendas guardadas en ese espacio.
 
 ## Etiquetas QR de las prendas
 
-La pantalla "Etiquetas de prendas" muestra el código QR de cada SKU, con el nombre, la talla y el color. Se imprimen igual que las de los espacios, desde el navegador del computador. Al abrir una prenda se puede imprimir una etiqueta por cada unidad en stock, para rotularlas todas.
+La pantalla "Etiquetas de prendas", que se abre desde la ficha de una prenda (en "Buscar producto") o al crear un producto, muestra el código QR de cada SKU, con el nombre, la talla y el color. Se imprimen igual que las de los espacios, desde el navegador del computador. Al abrir una prenda se puede imprimir una etiqueta por cada unidad en stock, para rotularlas todas.
 
-El QR contiene el SKU. Al escanearlo, la app identifica la talla y el color exactos de la prenda para contarla, moverla o darla de baja.
+El QR contiene el SKU. Al escanearlo, la app identifica la talla y el color exactos de la prenda para buscarla, ingresarla o darla de baja.
 
 ## Dos direcciones distintas de la app en el navegador
 
@@ -195,5 +230,7 @@ npm run test:e2e
 | `JWT_CLAVE_PRIVADA`, `JWT_CLAVE_PUBLICA` | Claves en formato PEM, en lugar de la carpeta | |
 | `DB_POOL_MAX` | Conexiones simultáneas a la base | `10` |
 | `MIGRACIONES_DIR` | Carpeta de migraciones | `db/migrations` |
+| `ANTHROPIC_API_KEY` | Clave del servicio de IA del chat del asesor. Sin ella, el chat no se muestra | vacío |
+| `DEEZER_API_URL` | API de donde el asesor toma la popularidad de las bandas | `https://api.deezer.com` |
 
 Las cuentas de demostración tienen contraseñas públicas. Fuera de desarrollo, usa `SEMBRAR_DEMO=false`.

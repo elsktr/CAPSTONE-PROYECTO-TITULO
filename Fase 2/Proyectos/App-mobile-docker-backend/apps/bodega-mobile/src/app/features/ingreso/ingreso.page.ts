@@ -65,7 +65,7 @@ interface LineaIngreso {
         <ion-buttons slot="start">
           <ion-back-button defaultHref="/inicio"></ion-back-button>
         </ion-buttons>
-        <ion-title>Ingreso de mercadería</ion-title>
+        <ion-title>Ingresar producto</ion-title>
       </ion-toolbar>
     </ion-header>
     <ion-content>

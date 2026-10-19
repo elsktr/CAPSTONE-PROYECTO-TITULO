@@ -16,7 +16,9 @@ import {
   alertCircleOutline,
   warningOutline,
 } from 'ionicons/icons';
+import ServidorApp from '../components/ServidorApp';
 import { useAuth } from '../contexts/AuthContext';
+import { esAppInstalada } from '../lib/servidor';
 import { useNavigate } from 'react-router-dom';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -123,6 +125,8 @@ const Login: React.FC = () => {
             <h1>Rockstar Store POS</h1>
             <p>Acceso vendedor</p>
           </div>
+          {/* En el teléfono no hay mismo origen: se muestra a qué equipo se conecta. */}
+          {esAppInstalada && <ServidorApp />}
           <form onSubmit={handleSubmit} noValidate>
             <IonItem
               className={

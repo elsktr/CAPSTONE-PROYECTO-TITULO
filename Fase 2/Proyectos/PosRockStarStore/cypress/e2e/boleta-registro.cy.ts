@@ -67,7 +67,7 @@ describe('POS - Boleta y Registro de Jornada', () => {
     cy.wait('@login');
     
     cy.contains('Medio de pago').should('be.visible');
-    cy.get('ion-radio[value="EFECTIVO"]').click();
+    cy.get('[data-medio="EFECTIVO"]').click();
     cy.contains('Confirmar y pagar').click();
     
     cy.wait('@venta');
@@ -103,7 +103,7 @@ describe('POS - Boleta y Registro de Jornada', () => {
     cy.wait('@login');
     
     cy.contains('Medio de pago').should('be.visible');
-    cy.get('ion-radio[value="EFECTIVO"]').click();
+    cy.get('[data-medio="EFECTIVO"]').click();
     cy.contains('Confirmar y pagar').click();
     
     cy.wait('@venta');
@@ -173,7 +173,7 @@ describe('POS - Boleta y Registro de Jornada', () => {
     cy.wait('@login');
 
     cy.contains('Medio de pago').should('be.visible');
-    cy.get('ion-radio[value="EFECTIVO"]').click();
+    cy.get('[data-medio="EFECTIVO"]').click();
     cy.contains('Confirmar y pagar').click();
 
     cy.wait('@venta');

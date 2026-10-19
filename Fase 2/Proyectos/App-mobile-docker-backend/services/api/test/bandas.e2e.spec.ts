@@ -77,6 +77,7 @@ describe('fotos de las bandas', () => {
       nombre: 'Metallica',
       imagenUrl: expect.stringMatching(/^\/api\/v1\/inventario\/catalogo\/bandas\/\d+\/imagen\?v=[0-9a-f]{16}$/),
       credito: 'Foto: Alguien · CC0',
+      concierto: null,
     });
     expect((await bandas()).find((b) => b.nombre === 'Metallica')).toEqual(cuerpo);
 
@@ -131,6 +132,48 @@ describe('fotos de las bandas', () => {
       cuerpo: { codigo: 'NO_ENCONTRADO', mensaje: 'La banda no tiene foto.' },
     });
     expect((await llamar('GET', '/inventario/catalogo/bandas/999999/imagen')).status).toBe(404);
+  });
+});
+
+describe('conciertos de las bandas en Chile', () => {
+  const registrar = <T = BandaCatalogo>(cuerpo: object, token = bodega) => llamar<T>('PUT', '/inventario/bandas/concierto', cuerpo, token);
+  const maiden = async () => (await bandas()).find((b) => b.nombre === 'Iron Maiden')!;
+
+  it('registra el próximo concierto de una banda y lo publica con ella, sin tocar su foto', async () => {
+    const metallica = (await bandas()).find((b) => b.nombre === 'Metallica')!;
+    expect((await maiden()).concierto).toBeNull();
+
+    const { status, cuerpo } = await registrar({ banda: 'iron maiden', fecha: '2026-10-31', lugar: '  Estadio Nacional, Santiago  ' });
+
+    expect(status).toBe(200);
+    expect(cuerpo).toMatchObject({ nombre: 'Iron Maiden', concierto: { fecha: '2026-10-31', lugar: 'Estadio Nacional, Santiago' } });
+    expect(await maiden()).toEqual(cuerpo);
+
+    // El lugar es opcional, y el concierto de una banda no cambia nada de otra.
+    expect((await registrar({ banda: 'Metallica', fecha: '2027-03-15' })).cuerpo).toEqual({ ...metallica, concierto: { fecha: '2027-03-15', lugar: null } });
+    expect((await maiden()).concierto).toEqual({ fecha: '2026-10-31', lugar: 'Estadio Nacional, Santiago' });
+  });
+
+  it('una fecha nueva reemplaza a la anterior y `null` quita el concierto', async () => {
+    expect((await registrar({ banda: 'Iron Maiden', fecha: '2026-11-01' })).cuerpo.concierto).toEqual({ fecha: '2026-11-01', lugar: null });
+    expect((await registrar({ banda: 'Iron Maiden', fecha: null, lugar: 'Estadio Nacional' })).cuerpo.concierto).toBeNull();
+    expect((await maiden()).concierto).toBeNull();
+  });
+
+  it('rechaza una fecha que no es un día real', async () => {
+    const mensaje = async (fecha: unknown) => (await registrar<ErrorApi>({ banda: 'Iron Maiden', fecha })).cuerpo.mensaje;
+    const esperado = 'La fecha del concierto debe ser un día válido, con la forma AAAA-MM-DD.';
+
+    expect(await mensaje('31-10-2026')).toBe(esperado);
+    expect(await mensaje('2026-02-30')).toBe(esperado);
+    expect(await mensaje(undefined)).toBe(esperado);
+    expect((await registrar<ErrorApi>({ banda: ' ', fecha: '2026-10-31' })).cuerpo.mensaje).toBe('El nombre es obligatorio.');
+    expect((await maiden()).concierto).toBeNull();
+  });
+
+  it('solo Bodega y Gerente registran conciertos', async () => {
+    expect((await registrar<ErrorApi>({ banda: 'Iron Maiden', fecha: '2026-10-31' }, vendedor)).status).toBe(403);
+    expect((await llamar('PUT', '/inventario/bandas/concierto', { banda: 'Iron Maiden', fecha: '2026-10-31' })).status).toBe(401);
   });
 });
 

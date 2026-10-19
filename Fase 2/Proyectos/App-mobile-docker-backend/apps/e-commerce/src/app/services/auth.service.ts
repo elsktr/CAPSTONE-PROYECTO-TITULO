@@ -57,9 +57,9 @@ export class AuthService {
     return this.user()!;
   }
 
-  /** Crea una cuenta de Cliente y la deja con la sesión iniciada. */
-  async register(name: string, email: string, password: string): Promise<CurrentUser> {
-    const body: RegistroRequest = { nombre: name, email, password };
+  /** Crea una cuenta de Cliente y la deja con la sesión iniciada. `phone` va completo, con su prefijo. */
+  async register(name: string, email: string, password: string, phone: string, address: string): Promise<CurrentUser> {
+    const body: RegistroRequest = { nombre: name, email, password, telefono: phone, direccion: address };
     this.store(await firstValueFrom(this.http.post<SesionResponse>(`${this.url}/registro`, body)));
     return this.user()!;
   }

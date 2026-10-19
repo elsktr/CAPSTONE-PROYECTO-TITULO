@@ -29,3 +29,6 @@ yarn-error.log*
 
 # Optional eslint cache
 .eslintcache
+
+# APK generado por `npm run apk`
+/apk

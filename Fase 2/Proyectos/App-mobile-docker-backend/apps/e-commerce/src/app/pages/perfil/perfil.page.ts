@@ -4,10 +4,10 @@ import { Router, RouterLink } from '@angular/router';
 import { IonContent, IonButton, IonIcon } from '@ionic/angular/standalone';
 import type { CompraPendiente, PedidoCliente, PerfilUsuario } from '@rockstar/contracts';
 import { addIcons } from 'ionicons';
-import { cardOutline, logOutOutline, mailOutline, personCircleOutline, receiptOutline, timeOutline } from 'ionicons/icons';
+import { callOutline, cardOutline, locationOutline, logOutOutline, mailOutline, personCircleOutline, receiptOutline, timeOutline } from 'ionicons/icons';
 import { OrderCardComponent } from '../../components/order-card.component';
 import { errorMessage } from '../../core/api';
-import { formatCLP, formatDate, roleLabel } from '../../data/models';
+import { formatCLP, formatDate, formatPhone, roleLabel } from '../../data/models';
 import { AuthService } from '../../services/auth.service';
 import { CartService } from '../../services/cart.service';
 import { ShopApi } from '../../services/shop.api';
@@ -46,10 +46,20 @@ const DATE_ONLY = new Intl.DateTimeFormat('es-CL', { dateStyle: 'long' });
               <ion-icon name="mail-outline" aria-hidden="true"></ion-icon>
               <span>{{ profile()?.email ?? u.email }}</span>
             </div>
-            <div class="account-row" *ngIf="profile() as p">
-              <ion-icon name="time-outline" aria-hidden="true"></ion-icon>
-              <span>Cuenta creada el {{ dateOnly(p.creadoEn) }}</span>
-            </div>
+            <ng-container *ngIf="profile() as p">
+              <div class="account-row" *ngIf="p.telefono">
+                <ion-icon name="call-outline" aria-hidden="true"></ion-icon>
+                <span>{{ formatPhone(p.telefono) }}</span>
+              </div>
+              <div class="account-row" *ngIf="p.direccion">
+                <ion-icon name="location-outline" aria-hidden="true"></ion-icon>
+                <span>{{ p.direccion }}</span>
+              </div>
+              <div class="account-row">
+                <ion-icon name="time-outline" aria-hidden="true"></ion-icon>
+                <span>Cuenta creada el {{ dateOnly(p.creadoEn) }}</span>
+              </div>
+            </ng-container>
             <span class="role">{{ u.role }}</span>
           </div>
         </div>
@@ -191,11 +201,14 @@ export class PerfilPage {
 
   formatCLP = formatCLP;
   formatDate = formatDate;
+  formatPhone = formatPhone;
   roleLabel = roleLabel;
 
   constructor() {
     addIcons({
+      'call-outline': callOutline,
       'card-outline': cardOutline,
+      'location-outline': locationOutline,
       'log-out-outline': logOutOutline,
       'mail-outline': mailOutline,
       'person-circle-outline': personCircleOutline,

@@ -235,6 +235,24 @@ describe('venta POS', () => {
     expect(await existencias(EDDIE)).toEqual(antes);
   });
 
+  it('acepta transferencia y guarda su número de operación', async () => {
+    const lineas = [{ idVariante: EDDIE, cantidad: 1, permitirBodega: true }];
+    const { status, cuerpo } = await vender({ lineas, medioPago: 'TRANSFERENCIA', numeroOperacion: ' 12345-AB ' });
+    expect(status).toBe(201);
+    expect(cuerpo).toMatchObject({ medioPago: { codigo: 'TRANSFERENCIA', nombre: 'Transferencia bancaria' }, numeroOperacion: '12345-AB', pagoMaquina: null });
+
+    const sinNumero = await vender({ lineas, medioPago: 'TRANSFERENCIA' });
+    expect(sinNumero.cuerpo.numeroOperacion).toBeNull();
+  });
+
+  it('el número de operación es solo de transferencias y la máquina solo de tarjetas', async () => {
+    const lineas = [{ idVariante: EDDIE, cantidad: 1, permitirBodega: true }];
+    expect((await vender<ErrorApi>({ lineas, medioPago: 'EFECTIVO', numeroOperacion: '123' })).status).toBe(400);
+    expect((await vender<ErrorApi>({ lineas, medioPago: 'TRANSFERENCIA', numeroOperacion: 'no válido!' })).status).toBe(400);
+    const pagoMaquina = { idCobro: randomUUID(), codigoAutorizacion: '123456' };
+    expect((await vender<ErrorApi>({ lineas, medioPago: 'TRANSFERENCIA', pagoMaquina })).status).toBe(400);
+  });
+
   it('solo la registra un Vendedor', async () => {
     const lineas = [{ idVariante: EDDIE, cantidad: 1 }];
     expect((await vender<ErrorApi>({ lineas }, cliente)).status).toBe(403);

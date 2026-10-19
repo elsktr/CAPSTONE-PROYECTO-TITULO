@@ -56,7 +56,7 @@ import { InventarioApi } from '../inventario/inventario.api';
         <ion-buttons slot="start">
           <ion-back-button defaultHref="/inicio"></ion-back-button>
         </ion-buttons>
-        <ion-title>Registrar merma</ion-title>
+        <ion-title>Ingreso de merma</ion-title>
       </ion-toolbar>
     </ion-header>
     <ion-content>

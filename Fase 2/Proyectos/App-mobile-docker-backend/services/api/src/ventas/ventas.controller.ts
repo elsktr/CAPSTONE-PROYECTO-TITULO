@@ -1,7 +1,19 @@
 import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
-import type { BalanceDia, CheckoutResponse, CompraPendiente, ComprobantePos, ResultadoPago, Usuario, VentaResumen } from '@rockstar/contracts';
+import type {
+  BalanceDia,
+  CajaAbierta,
+  CheckoutResponse,
+  CierreCaja,
+  CierresCaja,
+  CompraPendiente,
+  ComprobantePos,
+  ResultadoPago,
+  Usuario,
+  VentaResumen,
+} from '@rockstar/contracts';
 
 import { Publica, Roles, UsuarioActual } from '../auth/decoradores.js';
+import { CajaService } from './caja.service.js';
 import { ComprasService } from './compras.service.js';
 import { ResumenVentasService } from './resumen-ventas.service.js';
 import { VentasPosService } from './ventas-pos.service.js';
@@ -16,6 +28,7 @@ export class VentasController {
     private readonly compras: ComprasService,
     private readonly pos: VentasPosService,
     private readonly resumen: ResumenVentasService,
+    private readonly caja: CajaService,
   ) {}
 
   /** Ventas pagadas de la tienda web y del POS, juntas. Con `desde` (AAAA-MM-DD), solo las de ese día en adelante. Exige sesión de Gerente. */
@@ -51,6 +64,27 @@ export class VentasController {
   @Roles('CLIENTE')
   checkout(@Body() cuerpo: unknown, @UsuarioActual() cliente: Usuario): Promise<CheckoutResponse> {
     return this.compras.iniciar(cuerpo, cliente);
+  }
+
+  /** La caja abierta del Vendedor: sus ventas sin cerrar, por medio de pago. */
+  @Get('ventas/pos/caja')
+  @Roles('VENDEDOR')
+  cajaAbierta(@UsuarioActual() vendedor: Usuario): Promise<CajaAbierta> {
+    return this.caja.abierta(vendedor);
+  }
+
+  /** Cierra la caja del Vendedor con el efectivo contado. */
+  @Post('ventas/pos/cierres')
+  @Roles('VENDEDOR')
+  cerrarCaja(@Body() cuerpo: unknown, @UsuarioActual() vendedor: Usuario): Promise<CierreCaja> {
+    return this.caja.cerrar(cuerpo, vendedor);
+  }
+
+  /** Cierres de caja recientes y cajas abiertas, para el panel de finanzas del Gerente. */
+  @Get('ventas/cierres')
+  @Roles('GERENTE')
+  cierres(@Query() consulta: Record<string, string | undefined>): Promise<CierresCaja> {
+    return this.caja.listar(consulta);
   }
 
   /** Las compras de quien consulta que aún esperan su pago, de la más reciente a la más antigua. */

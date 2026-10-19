@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
-import type { BandaCatalogo, ImagenBandaRequest } from '@rockstar/contracts';
+import type { BandaCatalogo, ConciertoBandaRequest, ImagenBandaRequest } from '@rockstar/contracts';
 
 import { cuerpoComo, exigir, noEncontrado, texto } from '../comun/errores.js';
 import { BaseDeDatos, type Ejecutor } from '../db/base-de-datos.js';
@@ -24,11 +24,16 @@ const FIRMAS: Record<string, (bytes: Buffer) => boolean> = {
   'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
 };
 
+const LARGO_MAXIMO_LUGAR = 120;
+const FORMA_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
 interface FilaBanda {
   id_banda: number;
   nombre: string;
   imagen_huella: string | null;
   imagen_credito: string | null;
+  concierto_fecha: string | null;
+  concierto_lugar: string | null;
 }
 
 export interface ImagenDeBanda {
@@ -42,11 +47,26 @@ const aBanda = (fila: FilaBanda): BandaCatalogo => ({
   // La huella en la dirección hace que una foto nueva tenga dirección nueva: la anterior se puede guardar para siempre.
   imagenUrl: fila.imagen_huella ? `/api/v1/inventario/catalogo/bandas/${fila.id_banda}/imagen?v=${fila.imagen_huella}` : null,
   credito: fila.imagen_credito,
+  concierto: fila.concierto_fecha ? { fecha: fila.concierto_fecha, lugar: fila.concierto_lugar } : null,
 });
 
-const SELECCION = 'SELECT id_banda, nombre, imagen_huella, imagen_credito FROM inventario.bandas';
+/** La fecha sale como texto `AAAA-MM-DD`: es un día, no un instante, y no debe correrse con la zona horaria. */
+const COLUMNAS = `id_banda, nombre, imagen_huella, imagen_credito, to_char(concierto_fecha, 'YYYY-MM-DD') AS concierto_fecha, concierto_lugar`;
+const SELECCION = `SELECT ${COLUMNAS} FROM inventario.bandas`;
 
-/** Fotos de las bandas: se guardan en la base y se entregan por una dirección del backend. */
+/** Indica si el texto `AAAA-MM-DD` es un día que existe; "2026-02-30" no lo es. */
+function esFecha(valor: unknown): valor is string {
+  if (typeof valor !== 'string' || !FORMA_FECHA.test(valor)) {
+    return false;
+  }
+  const dia = new Date(`${valor}T00:00:00Z`);
+  return !Number.isNaN(dia.getTime()) && dia.toISOString().startsWith(valor);
+}
+
+/**
+ * Lo que la tienda muestra de cada banda: su foto, que se guarda en la base y se entrega
+ * por una dirección del backend, y su próximo concierto en Chile.
+ */
 @Injectable()
 export class BandasService {
   constructor(
@@ -88,8 +108,26 @@ export class BandasService {
       const banda = await this.catalogos.incorporar(tx, 'bandas', datos.banda);
       const [fila] = await tx.consultar<FilaBanda>(
         `UPDATE inventario.bandas SET imagen = $2, imagen_tipo = $3, imagen_huella = $4, imagen_credito = $5
-         WHERE id_banda = $1 RETURNING id_banda, nombre, imagen_huella, imagen_credito`,
+         WHERE id_banda = $1 RETURNING ${COLUMNAS}`,
         [banda.id, bytes, tipo, huella, credito],
+      );
+      return aBanda(fila!);
+    });
+  }
+
+  /** Registra el próximo concierto de la banda en Chile, o lo quita si no viene fecha. */
+  async guardarConcierto(cuerpo: unknown): Promise<BandaCatalogo> {
+    const datos = cuerpoComo<ConciertoBandaRequest>(cuerpo);
+    exigir(datos.fecha === null || esFecha(datos.fecha), 'La fecha del concierto debe ser un día válido, con la forma AAAA-MM-DD.');
+    exigir(datos.lugar == null || typeof datos.lugar === 'string', 'El lugar del concierto no es válido.');
+    const fecha = datos.fecha ?? null;
+    const lugar = fecha === null ? null : texto(datos.lugar).slice(0, LARGO_MAXIMO_LUGAR) || null;
+
+    return this.db.transaccion(async (tx: Ejecutor) => {
+      const banda = await this.catalogos.incorporar(tx, 'bandas', datos.banda);
+      const [fila] = await tx.consultar<FilaBanda>(
+        `UPDATE inventario.bandas SET concierto_fecha = $2, concierto_lugar = $3 WHERE id_banda = $1 RETURNING ${COLUMNAS}`,
+        [banda.id, fecha, lugar],
       );
       return aBanda(fila!);
     });

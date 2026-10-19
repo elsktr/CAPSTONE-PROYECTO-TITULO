@@ -93,9 +93,9 @@ export interface CompraPendiente extends CheckoutResponse {
 /**
  * Medios con que se cobra en la tienda. La tarjeta se cobra en la máquina de cobro de la
  * caja, que informa el pago (`PagoMaquina`), o en un terminal aparte, y entonces el POS
- * solo registra el medio.
+ * solo registra el medio. La transferencia la confirma el vendedor al verla recibida.
  */
-export type MedioPresencial = 'EFECTIVO' | 'DEBITO_PRESENCIAL' | 'CREDITO_PRESENCIAL';
+export type MedioPresencial = 'EFECTIVO' | 'DEBITO_PRESENCIAL' | 'CREDITO_PRESENCIAL' | 'TRANSFERENCIA';
 
 /** Pago con tarjeta aprobado en la máquina de cobro. Nunca lleva el número de la tarjeta. */
 export interface PagoMaquina {
@@ -133,6 +133,8 @@ export interface VentaPosRequest {
   idCliente?: number;
   /** Solo con débito o crédito cobrados en la máquina de cobro: el pago que aprobó. */
   pagoMaquina?: PagoMaquina;
+  /** Solo con transferencia: número de operación del comprobante del banco (letras, dígitos y guiones, hasta 40). */
+  numeroOperacion?: string;
 }
 
 /** Detalle de un rechazo `EXISTENCIA_EN_BODEGA`: líneas que se pueden vender retirándolas de bodega. */
@@ -159,6 +161,8 @@ export interface ComprobantePos {
   medioPago: { codigo: MedioPresencial; nombre: string };
   /** Autorización de la máquina de cobro; `null` en efectivo o tarjeta pasada en un terminal aparte. */
   pagoMaquina: { codigoAutorizacion: string; ultimosDigitos: string | null } | null;
+  /** Número de operación de una transferencia, si se informó. */
+  numeroOperacion: string | null;
   lineas: LineaComprobantePos[];
   total: number;
 }
@@ -208,4 +212,73 @@ export interface BalanceDia {
   comisiones: number;
   /** Prendas dadas de baja ese día, a su costo de compra. */
   mermas: number;
+}
+
+// --- Cierre de caja (POS) ---
+
+/** Ventas y monto de un medio de pago en una caja. */
+export interface TotalMedio {
+  codigo: MedioPresencial;
+  nombre: string;
+  ventas: number;
+  total: number;
+}
+
+/**
+ * GET /ventas/pos/caja (Vendedor)
+ *
+ * La caja abierta de quien consulta: sus ventas POS que aún no entran en un cierre.
+ */
+export interface CajaAbierta {
+  /** Fecha de la primera venta sin cerrar; `null` si no hay ventas. */
+  desde: string | null;
+  ventas: number;
+  total: number;
+  /** Siempre los cuatro medios presenciales, aunque no tengan ventas. */
+  porMedio: TotalMedio[];
+  ultimoCierre: { idCierre: number; fecha: string; fondoInicial: number } | null;
+}
+
+/**
+ * POST /ventas/pos/cierres (Vendedor)
+ *
+ * Cierra la caja: toma todas las ventas sin cerrar del vendedor y compara el efectivo
+ * contado con el esperado (fondo inicial + ventas en efectivo). Con diferencia, la
+ * observación es obligatoria. Reenviar la misma clave responde el mismo cierre.
+ */
+export interface CierreCajaRequest {
+  claveIdempotencia: string;
+  /** Efectivo con que partió la caja, en pesos. */
+  fondoInicial: number;
+  efectivoContado: number;
+  observacion?: string;
+}
+
+export interface CierreCaja {
+  idCierre: number;
+  vendedor: string;
+  fecha: string;
+  desde: string | null;
+  hasta: string | null;
+  ventas: number;
+  total: number;
+  porMedio: TotalMedio[];
+  fondoInicial: number;
+  efectivoVentas: number;
+  /** Fondo inicial + ventas en efectivo. */
+  efectivoEsperado: number;
+  efectivoContado: number;
+  /** Contado − esperado: positivo sobra, negativo falta. */
+  diferencia: number;
+  observacion: string | null;
+}
+
+/**
+ * GET /ventas/cierres?dias=30 (Gerente)
+ *
+ * Los cierres de los últimos días (1 a 365) y las cajas que siguen abiertas.
+ */
+export interface CierresCaja {
+  cierres: CierreCaja[];
+  abiertas: { vendedor: string; desde: string; ventas: number; total: number; efectivo: number }[];
 }

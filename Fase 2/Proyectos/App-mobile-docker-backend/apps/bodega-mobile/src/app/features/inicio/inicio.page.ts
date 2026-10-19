@@ -14,18 +14,7 @@ import {
 } from '@ionic/angular';
 import type { Pedido } from '@rockstar/contracts';
 import { addIcons } from 'ionicons';
-import {
-  chevronForward,
-  clipboardOutline,
-  downloadOutline,
-  gridOutline,
-  logOutOutline,
-  pricetagOutline,
-  qrCodeOutline,
-  swapHorizontalOutline,
-  timerOutline,
-  trashOutline,
-} from 'ionicons/icons';
+import { chevronForward, downloadOutline, gridOutline, logOutOutline, searchOutline, trashOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 
 import { mensajeDeError } from '../../core/api/errores';
@@ -218,62 +207,35 @@ export class InicioPage {
   private readonly router = inject(Router);
   private readonly logistica = inject(LogisticaApi);
 
+  /** Lo que hace la bodega en el día a día; lo demás se administra desde la tienda web. */
   protected readonly opciones: Opcion[] = [
     {
-      ruta: '/consulta',
-      titulo: 'Consultar producto',
-      detalle: 'Existencias por ubicación',
-      icono: 'qr-code-outline',
-      tono: '255, 194, 46',
-    },
-    {
       ruta: '/ingreso',
-      titulo: 'Ingreso de mercadería',
-      detalle: 'Recibir prendas',
+      titulo: 'Ingresar producto',
+      detalle: 'Recibir prendas o crear un producto nuevo',
       icono: 'download-outline',
       tono: '61, 220, 151',
     },
     {
-      ruta: '/merma',
-      titulo: 'Registrar merma',
-      detalle: 'Dañado, muestra o cambio',
-      icono: 'trash-outline',
-      tono: '255, 92, 92',
-    },
-    {
-      ruta: '/traspaso',
-      titulo: 'Traspaso',
-      detalle: 'Entre bodega y sala de ventas',
-      icono: 'swap-horizontal-outline',
-      tono: '76, 201, 240',
-    },
-    {
-      ruta: '/conteo',
-      titulo: 'Conteo',
-      detalle: 'Ajuste por conteo físico',
-      icono: 'clipboard-outline',
-      tono: '139, 123, 255',
-    },
-    {
-      ruta: '/busqueda',
-      titulo: 'Buscar prenda',
-      detalle: 'Ubicar una prenda y medir el tiempo',
-      icono: 'timer-outline',
-      tono: '255, 159, 67',
+      ruta: '/consulta',
+      titulo: 'Buscar producto',
+      detalle: 'Stock y ubicación de una prenda',
+      icono: 'search-outline',
+      tono: '255, 194, 46',
     },
     {
       ruta: '/espacios',
-      titulo: 'Espacios de bodega',
-      detalle: 'Etiquetas QR con el número de cada espacio',
+      titulo: 'Ubicaciones',
+      detalle: 'Racks de la bodega y sus etiquetas QR',
       icono: 'grid-outline',
       tono: '45, 212, 191',
     },
     {
-      ruta: '/etiquetas',
-      titulo: 'Etiquetas de prendas',
-      detalle: 'QR de cada SKU para contar y vender',
-      icono: 'pricetag-outline',
-      tono: '244, 114, 182',
+      ruta: '/merma',
+      titulo: 'Ingreso de merma',
+      detalle: 'Dañado, muestra o cambio',
+      icono: 'trash-outline',
+      tono: '255, 92, 92',
     },
   ];
 
@@ -289,18 +251,7 @@ export class InicioPage {
   });
 
   constructor() {
-    addIcons({
-      chevronForward,
-      clipboardOutline,
-      downloadOutline,
-      gridOutline,
-      logOutOutline,
-      pricetagOutline,
-      qrCodeOutline,
-      swapHorizontalOutline,
-      timerOutline,
-      trashOutline,
-    });
+    addIcons({ chevronForward, downloadOutline, gridOutline, logOutOutline, searchOutline, trashOutline });
   }
 
   /** Ionic lo llama cada vez que se vuelve a la pantalla principal. */

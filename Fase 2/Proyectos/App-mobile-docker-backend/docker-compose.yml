@@ -45,6 +45,8 @@ services:
       SEMBRAR_DEMO: ${SEMBRAR_DEMO:-true}
       # Orígenes que pueden llamar a la API desde un navegador, separados por coma. Vacío acepta cualquiera.
       CORS_ORIGENES: ${CORS_ORIGENES:-}
+      # Clave del servicio de IA que usa el asesor de inversión del Gerente. Sin ella, el resto funciona igual.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - api-claves:/claves
     ports:

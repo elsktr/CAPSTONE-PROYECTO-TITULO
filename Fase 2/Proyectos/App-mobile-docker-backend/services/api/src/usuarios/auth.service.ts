@@ -24,6 +24,19 @@ const credencialesInvalidas = () => new ErrorDeNegocio(401, 'CREDENCIALES_INVALI
 
 const FORMA_DE_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LARGO_MINIMO_CONTRASENA = 8;
+const LARGO_MAXIMO_DIRECCION = 200;
+const PREFIJO_CHILE = '+56';
+
+/**
+ * Deja un teléfono chileno como `+56912345678`: los números de Chile, fijos y móviles,
+ * tienen nueve dígitos después del prefijo. Acepta espacios, guiones y paréntesis, con o
+ * sin el prefijo. Devuelve `null` si lo escrito no es un número chileno completo.
+ */
+function telefonoChileno(valor: unknown): string | null {
+  const escrito = texto(valor).replace(/[\s\-()]/g, '');
+  const digitos = escrito.replace(/^\+?56(?=\d{9}$)/, '');
+  return /^\d{9}$/.test(digitos) ? `${PREFIJO_CHILE}${digitos}` : null;
+}
 
 @Injectable()
 export class AuthService {
@@ -58,14 +71,19 @@ export class AuthService {
     exigir(nombre !== '', 'El nombre es obligatorio.');
     exigir(FORMA_DE_CORREO.test(correo), 'El correo no es válido.');
     exigir(password.length >= LARGO_MINIMO_CONTRASENA, `La contraseña debe tener al menos ${LARGO_MINIMO_CONTRASENA} caracteres.`);
+    const telefono = telefonoChileno(datos.telefono);
+    exigir(telefono !== null, `El teléfono debe ser un número chileno: ${PREFIJO_CHILE} y 9 dígitos.`);
+    const direccion = texto(datos.direccion);
+    exigir(direccion !== '', 'La dirección es obligatoria.');
+    exigir(direccion.length <= LARGO_MAXIMO_DIRECCION, `La dirección puede tener hasta ${LARGO_MAXIMO_DIRECCION} caracteres.`);
 
     const hashContrasena = await hash(password);
     return this.db.transaccion(async (tx) => {
       const [creada] = await tx.consultar<{ id: number }>(
-        `INSERT INTO usuarios.usuarios (nombre, email, hash_contrasena, id_rol)
-         VALUES ($1, $2, $3, (SELECT id_rol FROM usuarios.roles WHERE nombre = 'CLIENTE'))
+        `INSERT INTO usuarios.usuarios (nombre, email, hash_contrasena, id_rol, telefono, direccion)
+         VALUES ($1, $2, $3, (SELECT id_rol FROM usuarios.roles WHERE nombre = 'CLIENTE'), $4, $5)
          ON CONFLICT (email) DO NOTHING RETURNING id_usuario AS id`,
-        [nombre, correo, hashContrasena],
+        [nombre, correo, hashContrasena, telefono, direccion],
       );
       if (!creada) {
         throw new ErrorDeNegocio(409, 'EMAIL_EN_USO', 'Ya existe una cuenta con ese correo.');

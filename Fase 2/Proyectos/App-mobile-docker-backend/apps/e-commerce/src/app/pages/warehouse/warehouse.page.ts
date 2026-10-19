@@ -17,7 +17,7 @@ import {
   IonTitle,
   IonButtons,
 } from '@ionic/angular/standalone';
-import type { Ubicacion } from '@rockstar/contracts';
+import type { GuiaDeTallas, Ubicacion } from '@rockstar/contracts';
 import { addIcons } from 'ionicons';
 import {
   cubeOutline,
@@ -28,19 +28,31 @@ import {
   pencilOutline,
   alertCircleOutline,
   closeOutline,
+  resizeOutline,
 } from 'ionicons/icons';
 import { errorMessage, uuid } from '../../core/api';
-import { formatCLP, usePlaceholder } from '../../data/models';
+import { currentMonthName, formatCLP, usePlaceholder } from '../../data/models';
 import { AdminService, StockRow } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
 import { ToastService } from '../../services/toast.service';
 
-type ModalKind = 'stock' | 'damage' | 'edit' | null;
+type ModalKind = 'stock' | 'damage' | 'edit' | 'guide' | null;
+
+/** Fila del formulario de la guía de tallas: lo escrito en cada campo, vacío si no hay medida. */
+interface GuideRow {
+  talla: string;
+  ancho: number | null;
+  largo: number | null;
+}
+
+/** Tope de una medida de la guía; el backend impone el mismo. */
+const MAX_CM = 300;
 
 /**
  * Inventario para el personal, con los datos reales del backend. Cada rol ve las
  * operaciones que el backend le permite: Bodega ingresa stock y registra mermas, y el
- * Gerente define el precio y la descripción con que el producto se publica en la tienda.
+ * Gerente define el precio, la oferta del mes, la descripción y el tipo de estampado con
+ * que el producto se publica en la tienda. Ambos mantienen la guía de tallas.
  */
 @Component({
   selector: 'app-warehouse',
@@ -94,6 +106,12 @@ type ModalKind = 'stock' | 'damage' | 'edit' | null;
           </div>
         </div>
 
+        <div class="tools" *ngIf="canEditGuide()">
+          <button class="action-btn" (click)="openGuide()">
+            <ion-icon name="resize-outline"></ion-icon> Guía de tallas
+          </button>
+        </div>
+
         <p class="notice" *ngIf="admin.unpricedCount() > 0">
           <ion-icon name="alert-circle-outline"></ion-icon>
           <span>
@@ -134,6 +152,7 @@ type ModalKind = 'stock' | 'damage' | 'edit' | null;
                 <td>
                   <span *ngIf="p.price !== null; else noPrice">{{ formatCLP(p.price) }}</span>
                   <ng-template #noPrice><span class="no-price">Sin precio</span></ng-template>
+                  <div class="offer" *ngIf="p.offerPrice !== null">Oferta de {{ month }}: {{ formatCLP(p.offerPrice) }}</div>
                 </td>
                 <td>
                   <span [class.text-accent]="p.stock <= 3" class="stock-num">{{ p.stock }}</span>
@@ -269,14 +288,70 @@ type ModalKind = 'stock' | 'damage' | 'edit' | null;
                 <ion-input type="number" min="1" [(ngModel)]="editForm.price" placeholder="Sin precio no se publica"></ion-input>
               </ion-item>
 
+              <label class="lbl">Precio de oferta de {{ month }} (CLP)</label>
+              <ion-item lines="none" class="input-item">
+                <ion-input type="number" min="1" [(ngModel)]="editForm.offerPrice" placeholder="Vacío: sin oferta este mes"></ion-input>
+              </ion-item>
+              <p class="hint">
+                Con oferta, el producto aparece en el carrusel de la portada y se cobra a ese precio hasta fin de mes. Después vuelve solo a su precio normal.
+              </p>
+
               <label class="lbl">Descripción</label>
               <ion-item lines="none" class="input-item">
                 <ion-textarea [(ngModel)]="editForm.description" rows="3" [autoGrow]="true"></ion-textarea>
               </ion-item>
 
+              <label class="lbl">Tipo de estampado</label>
+              <ion-item lines="none" class="input-item">
+                <ion-input [(ngModel)]="editForm.printType" maxlength="60" placeholder="Serigrafía, DTF, bordado…"></ion-input>
+              </ion-item>
+
               <p class="error-msg" *ngIf="modalError()" role="alert">{{ modalError() }}</p>
               <ion-button expand="block" class="btn-rockstar" [disabled]="saving()" (click)="submitEdit()">
                 {{ saving() ? 'Guardando…' : 'Guardar cambios' }}
+              </ion-button>
+            </div>
+          </ion-content>
+        </ng-template>
+      </ion-modal>
+
+      <!-- Modal: Guía de tallas -->
+      <ion-modal [isOpen]="modal() === 'guide'" (didDismiss)="closeModal()">
+        <ng-template>
+          <ion-header>
+            <ion-toolbar>
+              <ion-title>Guía de tallas</ion-title>
+              <ion-buttons slot="end">
+                <ion-button (click)="closeModal()"><ion-icon name="close-outline"></ion-icon></ion-button>
+              </ion-buttons>
+            </ion-toolbar>
+          </ion-header>
+          <ion-content class="rockstar-content">
+            <div class="page-padded">
+              <p class="text-muted">
+                Cuánto mide cada talla, con la prenda extendida y en centímetros. Las medidas valen para todos los productos de la
+                categoría y aparecen en la página de cada uno.
+              </p>
+              <label class="lbl">Categoría</label>
+              <ion-item lines="none" class="input-item">
+                <ion-select [ngModel]="guideCategory" (ngModelChange)="pickGuideCategory($event)" interface="popover">
+                  <ion-select-option *ngFor="let g of guides()" [value]="g.categoria">{{ g.categoria }}</ion-select-option>
+                </ion-select>
+              </ion-item>
+              <div class="guide-row guide-head"><span>Talla</span><span>Ancho (cm)</span><span>Largo (cm)</span></div>
+              <div class="guide-row" *ngFor="let row of guideRows">
+                <span class="guide-size">{{ row.talla }}</span>
+                <ion-item lines="none" class="input-item">
+                  <ion-input type="number" min="1" [max]="maxCm" inputmode="numeric" [(ngModel)]="row.ancho" [attr.aria-label]="'Ancho de la talla ' + row.talla"></ion-input>
+                </ion-item>
+                <ion-item lines="none" class="input-item">
+                  <ion-input type="number" min="1" [max]="maxCm" inputmode="numeric" [(ngModel)]="row.largo" [attr.aria-label]="'Largo de la talla ' + row.talla"></ion-input>
+                </ion-item>
+              </div>
+              <p class="hint">El ancho va de lado a lado, a la altura del pecho o de la cintura según la prenda. Un campo vacío deja esa medida sin mostrar.</p>
+              <p class="error-msg" *ngIf="modalError()" role="alert">{{ modalError() }}</p>
+              <ion-button expand="block" class="btn-rockstar" [disabled]="saving() || guideRows.length === 0" (click)="submitGuide()">
+                {{ saving() ? 'Guardando…' : 'Guardar medidas' }}
               </ion-button>
             </div>
           </ion-content>
@@ -293,6 +368,10 @@ type ModalKind = 'stock' | 'damage' | 'edit' | null;
     .metric ion-icon { font-size: 18px; margin-bottom: 8px; }
     .metric-value { font-size: 22px; font-weight: 900; }
     .metric-label { font-size: 11px; color: var(--text-faint); }
+    .tools { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+    .guide-row { display: grid; grid-template-columns: 64px 1fr 1fr; align-items: center; gap: 8px; margin-top: 8px; }
+    .guide-head { margin-top: 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); }
+    .guide-size { font-weight: 800; }
     .notice {
       display: flex; gap: 8px; align-items: flex-start;
       margin: 0 0 16px; padding: 12px;
@@ -315,6 +394,8 @@ type ModalKind = 'stock' | 'damage' | 'edit' | null;
     .mono { font-family: monospace; color: var(--text-muted); }
     .stock-num { font-weight: 900; }
     .no-price { padding: 2px 8px; border-radius: 999px; background: rgba(133, 77, 14, 0.3); color: #fde68a; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .offer { margin-top: 4px; font-size: 11px; font-weight: 700; color: #fca5a5; white-space: nowrap; }
+    .hint { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--text-faint); }
     .loc-cell { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }
     .actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .action-btn {
@@ -365,12 +446,20 @@ export class WarehousePage {
   /** Ingresos y mermas son de Bodega; el precio lo define el Gerente (matriz de permisos del backend). */
   canMoveStock = computed(() => this.auth.rol() === 'BODEGA');
   canEdit = computed(() => this.auth.rol() === 'GERENTE');
+  /** La guía de tallas la mantienen Bodega y el Gerente. */
+  canEditGuide = computed(() => this.auth.rol() === 'BODEGA' || this.auth.rol() === 'GERENTE');
+
+  guides = signal<GuiaDeTallas[]>([]);
+  guideCategory = '';
+  guideRows: GuideRow[] = [];
+  maxCm = MAX_CM;
 
   stockQty = 1;
   damageQty = 1;
   damageLocation: Ubicacion = 'BODEGA';
   damageReason = 'Prenda dañada';
-  editForm: { price: number | null; description: string } = { price: null, description: '' };
+  editForm: { price: number | null; offerPrice: number | null; description: string; printType: string } = { price: null, offerPrice: null, description: '', printType: '' };
+  month = currentMonthName();
 
   /** Clave de la operación abierta en el modal: reintentarla tras una falla de red no la duplica. */
   private operationKey = '';
@@ -385,6 +474,7 @@ export class WarehousePage {
       'pencil-outline': pencilOutline,
       'alert-circle-outline': alertCircleOutline,
       'close-outline': closeOutline,
+      'resize-outline': resizeOutline,
     });
     if (!this.auth.isAdmin()) {
       this.router.navigateByUrl('/entry');
@@ -410,7 +500,7 @@ export class WarehousePage {
     this.modalError.set('');
     this.operationKey = uuid();
     if (kind === 'edit') {
-      this.editForm = { price: product.price, description: product.description };
+      this.editForm = { price: product.price, offerPrice: product.offerPrice, description: product.description, printType: product.printType };
     } else if (kind === 'stock') {
       this.stockQty = 1;
     } else if (kind === 'damage') {
@@ -419,6 +509,38 @@ export class WarehousePage {
       this.damageReason = 'Prenda dañada';
     }
     this.modal.set(kind);
+  }
+
+  /** Abre la guía de tallas con las medidas guardadas, en la primera categoría. */
+  async openGuide() {
+    this.modalError.set('');
+    try {
+      this.guides.set(await this.admin.sizeGuides());
+      this.pickGuideCategory(this.guides()[0]?.categoria ?? '');
+      this.modal.set('guide');
+    } catch (error) {
+      this.toast.show(errorMessage(error));
+    }
+  }
+
+  pickGuideCategory(category: string) {
+    this.guideCategory = category;
+    const sizes = this.guides().find((g) => g.categoria === category)?.tallas ?? [];
+    this.guideRows = sizes.map((size) => ({ talla: size.talla, ancho: size.anchoCm, largo: size.largoCm }));
+    this.modalError.set('');
+  }
+
+  submitGuide() {
+    // Un campo vacío llega como `null` o como texto vacío, según cómo se haya borrado.
+    const cm = (raw: unknown) => (raw === null || String(raw).trim() === '' ? null : Number(raw));
+    const sizes = this.guideRows.map((row) => ({ talla: row.talla, anchoCm: cm(row.ancho), largoCm: cm(row.largo) }));
+    const valid = (value: number | null) => value === null || (Number.isInteger(value) && value >= 1 && value <= MAX_CM);
+    if (!sizes.every((size) => valid(size.anchoCm) && valid(size.largoCm))) {
+      this.modalError.set(`Las medidas van en centímetros enteros, entre 1 y ${MAX_CM}.`);
+      return;
+    }
+    const category = this.guideCategory;
+    void this.save(() => this.admin.saveSizeGuide(category, sizes), `Guía de tallas de ${category} guardada.`);
   }
 
   closeModal() {
@@ -454,15 +576,35 @@ export class WarehousePage {
   submitEdit() {
     const p = this.selected();
     if (!p) return;
-    const raw = this.editForm.price;
-    const price = raw === null || String(raw).trim() === '' ? null : Number(raw);
+    // Un campo de precio vacío llega como `null` o como texto vacío, según cómo se haya borrado.
+    const amount = (raw: unknown) => (raw === null || String(raw).trim() === '' ? null : Number(raw));
+    const price = amount(this.editForm.price);
+    const offerPrice = amount(this.editForm.offerPrice);
     if (price !== null && (!Number.isInteger(price) || price < 1)) {
       this.modalError.set('El precio debe ser un entero mayor que cero.');
       return;
     }
+    if (offerPrice !== null && (!Number.isInteger(offerPrice) || offerPrice < 1)) {
+      this.modalError.set('El precio de oferta debe ser un entero mayor que cero.');
+      return;
+    }
+    if (offerPrice !== null && (price === null || offerPrice >= price)) {
+      this.modalError.set('El precio de oferta debe ser menor que el precio normal.');
+      return;
+    }
     void this.save(
-      () => this.admin.updateProduct(p.productId, { precio: price, descripcion: this.editForm.description.trim() || null }),
-      price === null ? `${p.name} quedó sin precio y fuera de la tienda.` : `Producto actualizado: ${p.name}.`,
+      () =>
+        this.admin.updateProduct(p.productId, {
+          precio: price,
+          precioOferta: offerPrice,
+          descripcion: this.editForm.description.trim() || null,
+          tipoEstampado: this.editForm.printType.trim() || null,
+        }),
+      price === null
+        ? `${p.name} quedó sin precio y fuera de la tienda.`
+        : offerPrice === null
+          ? `Producto actualizado: ${p.name}.`
+          : `${p.name} quedó en oferta por ${this.month}.`,
     );
   }
 

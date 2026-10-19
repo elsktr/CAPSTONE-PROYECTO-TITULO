@@ -9,6 +9,7 @@ import type {
   CotizacionFlete,
   CuentaInterna,
   ErrorApi,
+  GuiaDeTallas,
   Movimiento,
   Pedido,
   PedidoCliente,
@@ -35,6 +36,8 @@ import { iniciarEntornoLocal } from './entorno-local.mjs';
 const FOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
 const EDDIE = 7;
 const RAYO = 8;
+/** Teléfono y dirección que pide el registro, escritos como los escribiría una persona. */
+const CONTACTO = { telefono: '+56 9 1234 5678', direccion: '  Av. Siempre Viva 742, Providencia  ' };
 
 let apiUrl: string;
 let db: PGlite;
@@ -117,7 +120,9 @@ describe('catálogo de la tienda', () => {
       talla: 'M',
       color: 'Negro',
       precio: 15990,
+      precioNormal: null,
       descripcion: null,
+      tipoEstampado: null,
       imagenUrl: 'assets/prendas/polera-eddie.webp',
       disponible: 11,
     });
@@ -157,30 +162,182 @@ describe('catálogo de la tienda', () => {
     await llamar('PATCH', ruta, { precio: null }, gerente);
     expect(await enCatalogo(creada.idVariante)).toBeUndefined();
   });
+
+  it('el Gerente pone un producto en oferta por el mes y la tienda cobra ese precio', async () => {
+    const nombre = `Polera Oferta ${randomUUID().slice(0, 8)}`;
+    const { cuerpo: creada } = await enviar<VarianteStock>(
+      '/inventario/productos',
+      { claveIdempotencia: randomUUID(), nombre, categoria: 'Poleras', banda: 'Exodus', talla: 'M', color: 'Negro', cantidad: 4, ubicacion: 'BODEGA', imagen: FOTO },
+      bodega,
+    );
+    const { idProducto } = (await obtener<VarianteGestion[]>('/inventario/productos', gerente)).cuerpo.find((v) => v.idVariante === creada.idVariante)!;
+    const editar = <T = VarianteGestion[]>(cambios: object, token = gerente) => llamar<T>('PATCH', `/inventario/productos/${idProducto}`, cambios, token);
+    const publicado = () => enCatalogo(creada.idVariante);
+
+    // Solo un producto con precio puede estar en oferta, y la oferta debe ser una rebaja.
+    expect((await editar<ErrorApi>({ precioOferta: 9990 })).cuerpo.mensaje).toBe('Un producto sin precio no puede estar en oferta.');
+    await editar({ precio: 19990 });
+    expect((await editar<ErrorApi>({ precioOferta: 19990 })).cuerpo.mensaje).toBe('El precio de oferta debe ser menor que el precio normal.');
+    expect((await editar<ErrorApi>({ precioOferta: 0 })).cuerpo.mensaje).toBe('El precio de oferta debe ser un entero mayor que cero.');
+    expect((await editar<ErrorApi>({ precioOferta: 14990 }, bodega)).status).toBe(403);
+    expect(await publicado()).toMatchObject({ precio: 19990, precioNormal: null });
+
+    const enOferta = await editar({ precioOferta: 14990 });
+    expect(enOferta.status).toBe(200);
+    expect(enOferta.cuerpo).toEqual([expect.objectContaining({ idVariante: creada.idVariante, precio: 19990, precioOferta: 14990 })]);
+    expect(await publicado()).toMatchObject({ precio: 14990, precioNormal: 19990 });
+
+    // El precio normal no puede quedar igual o por debajo de la oferta: el cambio no se aplica.
+    expect((await editar<ErrorApi>({ precio: 14990 })).cuerpo.mensaje).toBe('El precio debe ser mayor que el precio de oferta de este mes.');
+    expect(await publicado()).toMatchObject({ precio: 14990, precioNormal: 19990 });
+
+    // La compra se cobra y se guarda al precio de oferta.
+    const { cuerpo: compra } = await comprar([{ idVariante: creada.idVariante, cantidad: 2 }]);
+    expect(compra.subtotal).toBe(29980);
+    expect(await filas('SELECT precio_unitario FROM ventas.detalle_venta WHERE id_venta = $1', [compra.idVenta])).toEqual([{ precio_unitario: 14990 }]);
+    await pagar(compra.tokenPago, false);
+
+    // La oferta de un mes anterior ya no rige: el producto vuelve solo a su precio normal.
+    await db.query(`UPDATE inventario.ofertas SET mes = (mes - interval '1 month')::date WHERE id_producto = $1`, [idProducto]);
+    expect(await publicado()).toMatchObject({ precio: 19990, precioNormal: null });
+
+    // Cambiar la oferta la reemplaza; `null` la quita, y dejar el producto sin precio también.
+    await editar({ precioOferta: 12990 });
+    await editar({ precioOferta: 11990 });
+    expect(await publicado()).toMatchObject({ precio: 11990, precioNormal: 19990 });
+    await editar({ precioOferta: null });
+    expect(await publicado()).toMatchObject({ precio: 19990, precioNormal: null });
+    await editar({ precioOferta: 11990 });
+    await editar({ precio: null });
+    await editar({ precio: 19990 });
+    expect(await publicado()).toMatchObject({ precio: 19990, precioNormal: null });
+  });
+
+  it('el Gerente registra el tipo de estampado de un producto y la tienda lo publica', async () => {
+    const rayo = (await enCatalogo(RAYO))!;
+    const editar = <T = VarianteGestion[]>(cambios: object, token = gerente) => llamar<T>('PATCH', `/inventario/productos/${rayo.idProducto}`, cambios, token);
+
+    const editado = await editar({ tipoEstampado: '  Serigrafía  ' });
+    expect(editado.status).toBe(200);
+    expect(editado.cuerpo[0]).toMatchObject({ tipoEstampado: 'Serigrafía', precio: 14990 });
+    expect(await enCatalogo(RAYO)).toMatchObject({ tipoEstampado: 'Serigrafía', precio: 14990 });
+
+    expect((await editar<ErrorApi>({ tipoEstampado: 'a'.repeat(61) })).cuerpo.mensaje).toBe('El tipo de estampado puede tener hasta 60 caracteres.');
+    expect((await editar<ErrorApi>({ tipoEstampado: 7 })).cuerpo.mensaje).toBe('El tipo de estampado no es válido.');
+    expect((await editar<ErrorApi>({ tipoEstampado: 'Bordado' }, bodega)).status).toBe(403);
+
+    // Vacío o `null` lo quita, sin tocar lo demás del producto.
+    await editar({ tipoEstampado: ' ' });
+    expect(await enCatalogo(RAYO)).toMatchObject({ tipoEstampado: null, precio: 14990 });
+  });
+});
+
+describe('guía de tallas', () => {
+  const guias = async () => (await obtener<GuiaDeTallas[]>('/inventario/catalogo/guias-tallas')).cuerpo;
+  const guardar = <T = GuiaDeTallas>(cuerpo: object, token = bodega) => llamar<T>('PUT', '/inventario/categorias/medidas', cuerpo, token);
+
+  it('es pública y parte con las tallas de cada categoría, en su orden y sin medidas', async () => {
+    const { status, cuerpo } = await obtener<GuiaDeTallas[]>('/inventario/catalogo/guias-tallas');
+
+    expect(status).toBe(200);
+    expect(cuerpo.map((g) => g.categoria)).toEqual([...cuerpo.map((g) => g.categoria)].sort((a, b) => a.localeCompare(b, 'es')));
+    expect(cuerpo.find((g) => g.categoria === 'Poleras')!.tallas).toEqual(
+      ['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((talla) => ({ talla, anchoCm: null, largoCm: null })),
+    );
+    expect(cuerpo.find((g) => g.categoria === 'Pantalones')!.tallas.map((t) => t.talla)).toEqual(['38', '40', '42', '44', '46', '48', '50']);
+  });
+
+  it('guarda las medidas de las tallas enviadas y deja las demás como estaban', async () => {
+    const { status, cuerpo } = await guardar({ categoria: 'poleras', tallas: [{ talla: 'm', anchoCm: 52, largoCm: 72 }, { talla: 'L', anchoCm: 56, largoCm: null }] });
+
+    expect(status).toBe(200);
+    expect(cuerpo.categoria).toBe('Poleras');
+    expect(cuerpo.tallas).toEqual([
+      { talla: 'XS', anchoCm: null, largoCm: null },
+      { talla: 'S', anchoCm: null, largoCm: null },
+      { talla: 'M', anchoCm: 52, largoCm: 72 },
+      { talla: 'L', anchoCm: 56, largoCm: null },
+      { talla: 'XL', anchoCm: null, largoCm: null },
+      { talla: 'XXL', anchoCm: null, largoCm: null },
+    ]);
+    expect((await guias()).find((g) => g.categoria === 'Poleras')).toEqual(cuerpo);
+    // Las medidas son de la categoría: las de otra no cambian.
+    expect((await guias()).find((g) => g.categoria === 'Polerones')!.tallas.every((t) => t.anchoCm === null && t.largoCm === null)).toBe(true);
+
+    await guardar({ categoria: 'Poleras', tallas: [{ talla: 'L', anchoCm: null, largoCm: null }] });
+    expect((await guias()).find((g) => g.categoria === 'Poleras')!.tallas.filter((t) => t.anchoCm !== null)).toEqual([{ talla: 'M', anchoCm: 52, largoCm: 72 }]);
+  });
+
+  it('rechaza medidas que no son centímetros enteros o tallas que la categoría no admite', async () => {
+    const mensaje = async (cuerpo: object) => (await guardar<ErrorApi>(cuerpo)).cuerpo.mensaje;
+    const medidas = 'Las medidas van en centímetros enteros, entre 1 y 300.';
+
+    expect(await mensaje({ categoria: 'Poleras', tallas: [{ talla: 'M', anchoCm: 52.5, largoCm: 72 }] })).toBe(medidas);
+    expect(await mensaje({ categoria: 'Poleras', tallas: [{ talla: 'M', anchoCm: 0, largoCm: 72 }] })).toBe(medidas);
+    expect(await mensaje({ categoria: 'Poleras', tallas: [{ talla: 'M', anchoCm: 52, largoCm: '72' }] })).toBe(medidas);
+    expect(await mensaje({ categoria: 'Poleras', tallas: [{ talla: 'M', anchoCm: 52, largoCm: 301 }] })).toBe(medidas);
+    expect(await mensaje({ categoria: 'Poleras', tallas: [] })).toBe('Faltan las medidas de las tallas.');
+    expect(await mensaje({ categoria: 'Poleras', tallas: [{ anchoCm: 52, largoCm: 72 }] })).toBe('Cada medida necesita su talla.');
+    // Si una talla no corresponde, no se guarda ninguna de la solicitud.
+    expect(await mensaje({ categoria: 'Poleras', tallas: [{ talla: 'S', anchoCm: 48, largoCm: 68 }, { talla: '42', anchoCm: 40, largoCm: 100 }] })).toBe('La categoría no admite la talla 42.');
+    expect((await guias()).find((g) => g.categoria === 'Poleras')!.tallas.find((t) => t.talla === 'S')).toEqual({ talla: 'S', anchoCm: null, largoCm: null });
+    expect((await guardar<ErrorApi>({ categoria: 'No existe', tallas: [{ talla: 'M', anchoCm: 52, largoCm: 72 }] })).status).toBe(404);
+  });
+
+  it('solo Bodega y Gerente guardan medidas', async () => {
+    const cuerpo = { categoria: 'Poleras', tallas: [{ talla: 'M', anchoCm: 52, largoCm: 72 }] };
+    expect((await guardar(cuerpo, gerente)).status).toBe(200);
+    expect((await guardar(cuerpo, cliente)).status).toBe(403);
+    expect((await llamar('PUT', '/inventario/categorias/medidas', cuerpo)).status).toBe(401);
+  });
 });
 
 describe('cuentas de clientes', () => {
   it('el registro crea una cuenta de Cliente con la sesión iniciada', async () => {
     const email = `nuevo-${randomUUID().slice(0, 8)}@correo.cl`;
 
-    const { status, cuerpo } = await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: ' Ana Rock ', email: ` ${email.toUpperCase()} `, password: 'guitarra-8' });
+    const { status, cuerpo } = await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: ' Ana Rock ', email: ` ${email.toUpperCase()} `, password: 'guitarra-8', ...CONTACTO });
 
     expect(status).toBe(201);
     expect(cuerpo.usuario).toEqual({ id: expect.any(Number), nombre: 'Ana Rock', email, rol: 'CLIENTE' });
     expect((await obtener<PedidoCliente[]>('/logistica/pedidos/mios', cuerpo.accessToken)).cuerpo).toEqual([]);
     expect((await enviar<SesionResponse>('/usuarios/auth/login', { email, password: 'guitarra-8' })).status).toBe(200);
 
-    expect(await enviar<ErrorApi>('/usuarios/auth/registro', { nombre: 'Otra', email, password: 'guitarra-8' })).toEqual({
+    expect(await enviar<ErrorApi>('/usuarios/auth/registro', { nombre: 'Otra', email, password: 'guitarra-8', ...CONTACTO })).toEqual({
       status: 409,
       cuerpo: { codigo: 'EMAIL_EN_USO', mensaje: 'Ya existe una cuenta con ese correo.' },
     });
   });
 
   it('rechaza un registro con datos incompletos', async () => {
-    const registro = (datos: object) => enviar<ErrorApi>('/usuarios/auth/registro', { nombre: 'Ana', email: 'ana@correo.cl', password: 'guitarra-8', ...datos });
+    const registro = (datos: object) => enviar<ErrorApi>('/usuarios/auth/registro', { nombre: 'Ana', email: 'ana@correo.cl', password: 'guitarra-8', ...CONTACTO, ...datos });
     expect((await registro({ nombre: ' ' })).cuerpo.mensaje).toBe('El nombre es obligatorio.');
     expect((await registro({ email: 'sin-arroba' })).cuerpo.mensaje).toBe('El correo no es válido.');
     expect((await registro({ password: 'corta' })).cuerpo.mensaje).toBe('La contraseña debe tener al menos 8 caracteres.');
+    expect((await registro({ direccion: '  ' })).cuerpo.mensaje).toBe('La dirección es obligatoria.');
+    expect((await registro({ direccion: 'a'.repeat(201) })).cuerpo.mensaje).toBe('La dirección puede tener hasta 200 caracteres.');
+  });
+
+  it('el teléfono debe ser un número chileno y se guarda con su prefijo +56', async () => {
+    const registrar = <T>(telefono: unknown) =>
+      enviar<T>('/usuarios/auth/registro', { nombre: 'Ana', email: `fono-${randomUUID().slice(0, 8)}@correo.cl`, password: 'guitarra-8', direccion: 'Calle 1', telefono });
+    const guardado = async (telefono: string) =>
+      (await obtener<PerfilUsuario>('/usuarios/yo', (await registrar<SesionResponse>(telefono)).cuerpo.accessToken)).cuerpo.telefono;
+
+    // Con el prefijo o sin él, con espacios o guiones: queda siempre igual.
+    expect(await guardado('912345678')).toBe('+56912345678');
+    expect(await guardado('+56 9 1234 5678')).toBe('+56912345678');
+    expect(await guardado('56912345678')).toBe('+56912345678');
+    expect(await guardado('(2) 2345-6789')).toBe('+56223456789');
+    // Un número que empieza con 56 y tiene nueve dígitos no pierde esos dígitos.
+    expect(await guardado('561234567')).toBe('+56561234567');
+
+    for (const telefono of [undefined, '', '12345678', '9123456789', '+54 9 1234 5678', '9 1234 567a', '+56']) {
+      expect((await registrar<ErrorApi>(telefono)).cuerpo, String(telefono)).toEqual({
+        codigo: 'DATOS_INVALIDOS',
+        mensaje: 'El teléfono debe ser un número chileno: +56 y 9 dígitos.',
+      });
+    }
   });
 
   it('el Gerente ve las cuentas del personal, sin las de clientes', async () => {
@@ -320,7 +477,7 @@ describe('compra web', () => {
   });
 
   it('cada cliente ve solo sus pedidos', async () => {
-    const otro = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Otro', email: `otro-${randomUUID().slice(0, 8)}@correo.cl`, password: 'guitarra-8' })).cuerpo;
+    const otro = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Otro', email: `otro-${randomUUID().slice(0, 8)}@correo.cl`, password: 'guitarra-8', ...CONTACTO })).cuerpo;
     expect((await obtener<PedidoCliente[]>('/logistica/pedidos/mios', otro.accessToken)).cuerpo).toEqual([]);
     expect((await obtener('/logistica/pedidos', otro.accessToken)).status).toBe(403);
     expect((await obtener('/logistica/pedidos/mios', bodega)).status).toBe(403);
@@ -434,7 +591,7 @@ describe('compra web', () => {
 
   it('dos clientes que compran a la vez las últimas unidades no las venden dos veces', async () => {
     const disponible = (await enCatalogo(RAYO))!.disponible;
-    const otro = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Rival', email: `rival-${randomUUID().slice(0, 8)}@correo.cl`, password: 'guitarra-8' })).cuerpo.accessToken;
+    const otro = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Rival', email: `rival-${randomUUID().slice(0, 8)}@correo.cl`, password: 'guitarra-8', ...CONTACTO })).cuerpo.accessToken;
 
     const respuestas = await Promise.all([
       comprar<CheckoutResponse | ErrorApi>([{ idVariante: RAYO, cantidad: disponible }], cliente),
@@ -452,28 +609,37 @@ describe('perfil del cliente', () => {
   it('cada cuenta ve sus propios datos, leídos de la base', async () => {
     const email = `perfil-${randomUUID().slice(0, 8)}@correo.cl`;
     const antes = Date.now();
-    const sesion = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Ana Perfil', email, password: 'guitarra-8' })).cuerpo;
+    const sesion = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Ana Perfil', email, password: 'guitarra-8', ...CONTACTO })).cuerpo;
 
     const { status, cuerpo } = await obtener<PerfilUsuario>('/usuarios/yo', sesion.accessToken);
 
     expect(status).toBe(200);
-    expect(cuerpo).toEqual({ id: sesion.usuario.id, nombre: 'Ana Perfil', email, rol: 'CLIENTE', creadoEn: expect.any(String) });
+    expect(cuerpo).toEqual({
+      id: sesion.usuario.id,
+      nombre: 'Ana Perfil',
+      email,
+      rol: 'CLIENTE',
+      creadoEn: expect.any(String),
+      telefono: '+56912345678',
+      direccion: 'Av. Siempre Viva 742, Providencia',
+    });
     expect(new Date(cuerpo.creadoEn).getTime()).toBeGreaterThanOrEqual(antes - 5000);
     // No entrega la contraseña ni su hash.
     expect(JSON.stringify(cuerpo)).not.toMatch(/hash|contrasena|password/i);
 
-    expect((await obtener<PerfilUsuario>('/usuarios/yo', bodega)).cuerpo).toMatchObject({ email: 'bodega@rockstar.cl', rol: 'BODEGA' });
+    // Las cuentas del personal y las anteriores no tienen teléfono ni dirección.
+    expect((await obtener<PerfilUsuario>('/usuarios/yo', bodega)).cuerpo).toMatchObject({ email: 'bodega@rockstar.cl', rol: 'BODEGA', telefono: null, direccion: null });
     expect((await obtener('/usuarios/yo')).status).toBe(401);
   });
 
   it('una cuenta desactivada deja de ver su perfil aunque su token siga vigente', async () => {
-    const sesion = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Baja', email: `baja-${randomUUID().slice(0, 8)}@correo.cl`, password: 'guitarra-8' })).cuerpo;
+    const sesion = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Baja', email: `baja-${randomUUID().slice(0, 8)}@correo.cl`, password: 'guitarra-8', ...CONTACTO })).cuerpo;
     await db.query('UPDATE usuarios.usuarios SET activo = false WHERE id_usuario = $1', [sesion.usuario.id]);
     expect((await obtener('/usuarios/yo', sesion.accessToken)).status).toBe(401);
   });
 
   it('lista las compras que esperan pago, con lo necesario para retomarlas', async () => {
-    const comprador = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Comprador', email: `comprador-${randomUUID().slice(0, 8)}@correo.cl`, password: 'guitarra-8' })).cuerpo.accessToken;
+    const comprador = (await enviar<SesionResponse>('/usuarios/auth/registro', { nombre: 'Comprador', email: `comprador-${randomUUID().slice(0, 8)}@correo.cl`, password: 'guitarra-8', ...CONTACTO })).cuerpo.accessToken;
     const pendientes = async (token = comprador) => (await obtener<CompraPendiente[]>('/ventas/pendientes', token)).cuerpo;
     expect(await pendientes()).toEqual([]);
 

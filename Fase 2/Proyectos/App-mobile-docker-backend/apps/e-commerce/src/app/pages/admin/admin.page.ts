@@ -25,9 +25,12 @@ import {
 import type { BalanceDia, Rol, VentaResumen } from '@rockstar/contracts';
 import { errorMessage } from '../../core/api';
 import { formatCLP, roleLabel } from '../../data/models';
+import { CierresCajaComponent } from '../../components/cierres-caja.component';
 import { AdminService, SalesPeriod, periodStart } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
 import { CartService } from '../../services/cart.service';
+import { AdvisorChatComponent } from '../../components/advisor-chat.component';
+import { InvestmentAdviceComponent } from '../../components/investment-advice.component';
 
 /** Filas que se muestran de una vez en cada lista. */
 const PAGE_SIZE = 5;
@@ -68,7 +71,7 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
 @Component({
   selector: 'app-admin',
   standalone: true,
-  imports: [CommonModule, RouterLink, IonContent, IonIcon, IonButton],
+  imports: [CommonModule, RouterLink, IonContent, IonIcon, IonButton, AdvisorChatComponent, InvestmentAdviceComponent, CierresCajaComponent],
   template: `
     <ion-content class="rockstar-content" [fullscreen]="true">
       <div class="page-padded dash">
@@ -263,17 +266,22 @@ const levelOf = (percent: number): Level => (percent >= 80 ? 'ok' : percent >= 5
           </div>
         </div>
 
+        <app-investment-advice></app-investment-advice>
+        <app-advisor-chat></app-advisor-chat>
+
         <a class="modelo-card" routerLink="/inversion">
           <span class="badge violet"><ion-icon name="trending-up-outline" aria-hidden="true"></ion-icon></span>
           <div>
-            <h3>Recomendaciones de inversión</h3>
+            <h3>Pronóstico de demanda y compras</h3>
             <p>
-              Modelo predictivo con las ventas del e-commerce y de la tienda física: qué comprar y cuánto, qué no reponer
-              y qué bandas y categorías están creciendo.
+              Modelo predictivo con las ventas del e-commerce y de la tienda física: qué prenda y talla comprar y cuánto,
+              qué no reponer y qué bandas y categorías están creciendo.
             </p>
           </div>
-          <span class="modelo-ir">Ver recomendaciones →</span>
+          <span class="modelo-ir">Ver pronóstico →</span>
         </a>
+
+        <app-cierres-caja *ngIf="admin.cierres() as cierres" [datos]="cierres"></app-cierres-caja>
 
         <div class="grid-2">
           <section class="panel" aria-labelledby="resumen-titulo">

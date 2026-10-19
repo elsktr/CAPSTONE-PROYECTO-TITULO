@@ -61,9 +61,21 @@ Ver `.env.example` (desarrollo) y `.env.production` (valores del contenedor).
 - **Stock**: sale de la sala de ventas. Si la sala no alcanza, el backend responde
   `409 EXISTENCIA_EN_BODEGA` y el POS ofrece "Retirar de bodega"; al aceptar reenvía
   con `permitirBodega` y la misma clave de idempotencia.
-- **Medios de pago**: efectivo, débito o crédito. Con la máquina de cobro activa, la
-  tarjeta se cobra enviándole el monto (ver abajo); sin ella, se pasa por un terminal
-  aparte y el POS solo registra el medio (Webpay es de la tienda web).
+- **Medios de pago**: efectivo, tarjeta o transferencia (Webpay es de la tienda web).
+  - **Efectivo**: monto recibido con atajos ($15.000, $20.000…) y vuelto; no deja
+    confirmar si el monto no alcanza. Recibido y vuelto salen en la boleta.
+  - **Tarjeta**: débito o crédito. Con la máquina de cobro activa se cobra enviándole
+    el monto (ver abajo); sin ella, se pasa por un terminal aparte y el POS solo
+    registra el medio.
+  - **Transferencia**: muestra los datos de la cuenta de la tienda (con "Copiar datos")
+    y pide el número de operación del comprobante, opcional; se guarda con la venta.
+    Los datos de la cuenta son de ejemplo: están en `src/utils/pago.ts`.
+- **Cierre de caja** (ícono de billetera, barra superior): muestra las ventas del
+  vendedor desde su último cierre por medio de pago, pide el fondo inicial (propone
+  el del cierre anterior) y el efectivo contado, y calcula el esperado (fondo + ventas
+  en efectivo). Si no cuadra, la observación es obligatoria. El cierre queda en la
+  base (`POST /ventas/pos/cierres`), se puede imprimir y aparece en el panel de
+  finanzas del Gerente en la tienda (Finanzas & RRHH → Cierres de caja).
 - **Boleta**: comprobante interno sin validez tributaria, con id, fecha, vendedor,
   cliente, líneas, total y medio; impresión con CSS print-only (`window.print()`). Tras
   la venta: stock se refresca, carrito se vacía y el registro de jornada
@@ -152,15 +164,38 @@ WHERE t.codigo_autorizacion = '970317';
 Los cobros que se anulan en la máquina (porque la venta no se registró) no generan
 venta y no quedan en la base; los muestra el reporte de la propia máquina.
 
+## App Android (APK)
+
+El POS también se instala en un teléfono o tablet Android. Con el backend levantado en
+este equipo y el dispositivo en la misma red Wi-Fi:
+
+```bash
+npm run apk                                          # servidor: la IP de este equipo, puerto 3000
+npm run apk -- --servidor=http://192.168.1.20:3000   # otra dirección inicial
+```
+
+El APK queda en `apk/rockstar-pos.apk`. Cópialo al dispositivo y ábrelo para instalarlo;
+Android pedirá permitir la instalación desde esa fuente.
+
+- La dirección del servidor es solo la inicial: en el inicio de sesión de la app aparece
+  "Servidor", con "Cambiar" y "Probar conexión", por si el equipo cambia de IP.
+- La máquina de cobro se configura igual que en el navegador, con la IP del equipo y el
+  puerto 8090 (por ejemplo `192.168.1.20:8090`).
+- Requiere JDK 21 y el SDK de Android con la plataforma 36 (`ANDROID_HOME` o
+  `android/local.properties`), como la app de bodega. Si el Java del sistema es más
+  antiguo, define `JAVA_HOME` con el JDK 21 antes de ejecutar el comando.
+- Si el teléfono no llega al servidor, revisa que el firewall de Windows permita
+  conexiones entrantes a los puertos 3000 y 8090 en la red privada.
+
 ## Pruebas
 
 ```bash
-npm run test.unit -- --run   # Vitest (cliente API, búsqueda, máquina de cobro, smoke App)
+npm run test.unit -- --run   # Vitest (cliente API, servidor, búsqueda, máquina de cobro, smoke App)
 npm run test.terminal        # máquina de cobro simulada (node --test)
 npm run test.e2e             # Cypress contra http://localhost:8082 (requiere contenedores)
 ```
 
-La suite e2e (45 tests) usa intercepts con `cypress/fixtures/catalogo-integracion.json`
+La suite e2e (51 tests) usa intercepts con `cypress/fixtures/catalogo-integracion.json`
 (7 variantes) salvo salud/login reales. `maquina-cobro.cy.ts` responde la máquina con
 intercepts; `maquina-cobro-real.cy.ts` cobra contra el contenedor `terminal` de verdad.
 Desde la terminal integrada de VS Code, Cypress necesita

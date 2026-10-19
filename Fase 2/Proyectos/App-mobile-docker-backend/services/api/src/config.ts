@@ -20,6 +20,13 @@ export interface Configuracion {
   origenesCors: string[] | true;
   /** Carga cuentas, productos y pedidos de demostración si la base está vacía. */
   sembrarDemo: boolean;
+  /**
+   * Hay una credencial del servicio de IA para el asesor de inversión. La credencial
+   * misma no se guarda aquí: el SDK la lee de `ANTHROPIC_API_KEY` o `ANTHROPIC_AUTH_TOKEN`.
+   */
+  asesorConfigurado: boolean;
+  /** Dirección de la API pública de Deezer, de donde sale la popularidad de las bandas. */
+  deezerUrl: string;
 }
 
 const VERDADERO = new Set(['1', 'true', 'si', 'sí', 'yes']);
@@ -57,5 +64,7 @@ export function leerConfiguracion(env: NodeJS.ProcessEnv = process.env): Configu
     clavePublica: env['JWT_CLAVE_PUBLICA']?.trim() || undefined,
     origenesCors: origenes.length === 0 || origenes.includes('*') ? true : origenes,
     sembrarDemo: VERDADERO.has((env['SEMBRAR_DEMO'] ?? '').trim().toLowerCase()),
+    asesorConfigurado: Boolean(env['ANTHROPIC_API_KEY']?.trim() || env['ANTHROPIC_AUTH_TOKEN']?.trim()),
+    deezerUrl: (env['DEEZER_API_URL']?.trim() || 'https://api.deezer.com').replace(/\/+$/, ''),
   };
 }

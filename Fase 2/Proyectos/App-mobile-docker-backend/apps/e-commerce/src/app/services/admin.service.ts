@@ -2,12 +2,22 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import type {
   BalanceDia,
+  CierresCaja,
+  ConciertoBandaRequest,
+  ConsultaAsesorRequest,
   CuentaInterna,
+  EstadoAsesor,
+  GuiaDeTallas,
   IngresoRequest,
+  MedidaDeTalla,
+  MedidasDeCategoriaRequest,
+  MensajeAsesor,
   MermaRequest,
   Movimiento,
   Pedido,
   ProductoEdicionRequest,
+  Recomendaciones,
+  RespuestaAsesor,
   Ubicacion,
   VarianteGestion,
   VentaResumen,
@@ -28,7 +38,11 @@ export interface StockRow {
   color: string;
   /** `null` mientras el Gerente no define el precio; sin precio no se publica en la tienda. */
   price: number | null;
+  /** Precio de oferta de este mes; `null` si el producto no está en oferta. */
+  offerPrice: number | null;
   description: string;
+  /** Técnica del estampado; vacío si no está registrada. */
+  printType: string;
   image: string;
   location: string;
   active: boolean;
@@ -74,7 +88,9 @@ function toRow(variante: VarianteGestion): StockRow {
     size: variante.talla,
     color: variante.color,
     price: variante.precio,
+    offerPrice: variante.precioOferta,
     description: variante.descripcion ?? '',
+    printType: variante.tipoEstampado ?? '',
     image: variante.imagenUrl ?? PLACEHOLDER_IMAGE,
     location: variante.codigoUbicacion,
     active: variante.activo,
@@ -119,6 +135,8 @@ export class AdminService {
     const spent = expenses.garments + expenses.shipping + expenses.fees + expenses.losses;
     return { web, pos, income, expenses, spent, profit: income - spent, margin: income ? ((income - spent) / income) * 100 : 0 };
   });
+  /** Cierres de caja del POS de los últimos 30 días y cajas aún abiertas. */
+  readonly cierres = signal<CierresCaja | null>(null);
 
   readonly totalUnits = computed(() => this.inventory().reduce((sum, p) => sum + p.stock, 0));
   readonly lowStockCount = computed(() => this.inventory().filter((p) => p.active && p.stock <= 3).length);
@@ -172,13 +190,15 @@ export class AdminService {
 
   /** Lo que muestra la vista de finanzas, que es del Gerente. */
   async loadFinance(period: SalesPeriod): Promise<void> {
-    const [, , losses, orders, staff] = await Promise.all([
+    const [, , losses, orders, staff, cierres] = await Promise.all([
       this.loadInventory(),
       this.loadSales(period),
       firstValueFrom(this.http.get<Movimiento[]>(`${API_URL}/inventario/movimientos`, { params: { tipo: 'MERMA' } })),
       firstValueFrom(this.http.get<Pedido[]>(`${API_URL}/logistica/pedidos`)),
       firstValueFrom(this.http.get<CuentaInterna[]>(`${API_URL}/usuarios/internos`)),
+      firstValueFrom(this.http.get<CierresCaja>(`${API_URL}/ventas/cierres`, { params: { dias: 30 } })),
     ]);
+    this.cierres.set(cierres);
     this.losses.set(losses);
     this.orders.set(orders);
     this.staff.set(staff);
@@ -209,7 +229,43 @@ export class AdminService {
     await this.loadInventory();
   }
 
-  /** Cambia el precio y la descripción del producto; aplica a todas sus tallas. */
+  /** Recomendaciones de inversión calculadas con reglas: bandas, tipos de producto y qué reponer. */
+  investmentAdvice(): Promise<Recomendaciones> {
+    return firstValueFrom(this.http.get<Recomendaciones>(`${API_URL}/asesor/recomendaciones`));
+  }
+
+  /** Indica si el chat con IA tiene la clave del servicio que necesita. */
+  async advisorReady(): Promise<boolean> {
+    return (await firstValueFrom(this.http.get<EstadoAsesor>(`${API_URL}/asesor/estado`))).configurado;
+  }
+
+  /**
+   * Le pregunta al asesor de inversión. Va la conversación completa: el backend no la
+   * guarda. La respuesta puede tardar más de un minuto, porque busca en internet.
+   */
+  askAdvisor(messages: MensajeAsesor[]): Promise<RespuestaAsesor> {
+    const body: ConsultaAsesorRequest = { mensajes: messages };
+    return firstValueFrom(this.http.post<RespuestaAsesor>(`${API_URL}/asesor/consultas`, body));
+  }
+
+  /** La guía de tallas de todas las categorías, con las tallas que aún no tienen medidas. */
+  sizeGuides(): Promise<GuiaDeTallas[]> {
+    return firstValueFrom(this.http.get<GuiaDeTallas[]>(`${API_URL}/inventario/catalogo/guias-tallas`));
+  }
+
+  /** Guarda las medidas de las tallas de una categoría. */
+  async saveSizeGuide(category: string, sizes: MedidaDeTalla[]): Promise<void> {
+    const body: MedidasDeCategoriaRequest = { categoria: category, tallas: sizes };
+    await firstValueFrom(this.http.put(`${API_URL}/inventario/categorias/medidas`, body));
+  }
+
+  /** Registra el próximo concierto de una banda en Chile; sin fecha, lo quita. */
+  async saveConcert(band: string, date: string | null, place: string | null): Promise<void> {
+    const body: ConciertoBandaRequest = { banda: band, fecha: date, lugar: place };
+    await firstValueFrom(this.http.put(`${API_URL}/inventario/bandas/concierto`, body));
+  }
+
+  /** Cambia el precio, la oferta del mes, la descripción y el tipo de estampado del producto; aplica a todas sus tallas. */
   async updateProduct(productId: number, changes: ProductoEdicionRequest): Promise<void> {
     await firstValueFrom(this.http.patch(`${API_URL}/inventario/productos/${productId}`, changes));
     await this.loadInventory();

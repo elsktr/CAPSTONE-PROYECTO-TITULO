@@ -33,6 +33,7 @@ const TABLAS_DEL_DISENO: Record<string, string[]> = {
     'conteos',
     'existencias',
     'movimientos',
+    'ofertas',
     'operaciones',
     'productos',
     'reservas',
@@ -42,7 +43,7 @@ const TABLAS_DEL_DISENO: Record<string, string[]> = {
     'ubicaciones',
     'variantes',
   ],
-  ventas: ['costos_venta', 'detalle_venta', 'estados_venta', 'parametros_financieros', 'ventas', 'visitas'],
+  ventas: ['cierres_caja', 'costos_venta', 'detalle_venta', 'estados_venta', 'parametros_financieros', 'ventas', 'visitas'],
   pagos: ['medios_pago', 'transacciones'],
   logistica: [
     'comunas',
@@ -163,12 +164,14 @@ describe('modelo de datos', () => {
         'inventario.conteos -> usuarios.usuarios',
         'inventario.movimientos -> usuarios.usuarios',
         'inventario.movimientos -> ventas.ventas',
+        'inventario.ofertas -> usuarios.usuarios',
         'inventario.operaciones -> usuarios.usuarios',
         'inventario.reservas -> ventas.ventas',
         'logistica.historial_pedido -> usuarios.usuarios',
         'logistica.pedidos -> ventas.ventas',
         'logistica.solicitudes_despacho -> ventas.ventas',
         'pagos.transacciones -> ventas.ventas',
+        'ventas.cierres_caja -> usuarios.usuarios',
         'ventas.detalle_venta -> inventario.ubicaciones',
         'ventas.detalle_venta -> inventario.variantes',
         'ventas.parametros_financieros -> usuarios.usuarios',
@@ -188,7 +191,7 @@ describe('modelo de datos', () => {
       [
         'pagos.medios_pago',
         'codigo',
-        ['CREDITO_PRESENCIAL', 'DEBITO_PRESENCIAL', 'EFECTIVO', 'WEBPAY_CREDITO', 'WEBPAY_DEBITO', 'WEBPAY_PREPAGO'],
+        ['CREDITO_PRESENCIAL', 'DEBITO_PRESENCIAL', 'EFECTIVO', 'TRANSFERENCIA', 'WEBPAY_CREDITO', 'WEBPAY_DEBITO', 'WEBPAY_PREPAGO'],
       ],
     ])('%s trae sus valores', async (tabla, columna, esperados) => {
       const valores = await filas<{ v: string }>(`SELECT ${columna} AS v FROM ${tabla}`);
@@ -200,7 +203,7 @@ describe('modelo de datos', () => {
       const presenciales = await filas<{ codigo: string }>(
         'SELECT codigo FROM pagos.medios_pago WHERE presencial ORDER BY id_medio',
       );
-      expect(presenciales.map((m) => m.codigo)).toEqual(['EFECTIVO', 'DEBITO_PRESENCIAL', 'CREDITO_PRESENCIAL']);
+      expect(presenciales.map((m) => m.codigo)).toEqual(['EFECTIVO', 'DEBITO_PRESENCIAL', 'CREDITO_PRESENCIAL', 'TRANSFERENCIA']);
     });
 
     it('trae las 346 comunas de Chile repartidas en sus 16 regiones', async () => {

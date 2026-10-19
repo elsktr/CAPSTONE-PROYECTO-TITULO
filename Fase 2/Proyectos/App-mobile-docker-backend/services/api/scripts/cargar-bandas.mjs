@@ -7,50 +7,15 @@
 // códigos de ubicación y registra el ingreso de las unidades. Se puede ejecutar más de una
 // vez: lo que ya existe no se duplica, y un precio ya definido por el Gerente no se toca.
 //
-// Las cuentas por defecto son las de demostración. Para otras:
-//   BODEGA_EMAIL, BODEGA_PASSWORD, GERENTE_EMAIL, GERENTE_PASSWORD
+// Las cuentas y la dirección se configuran como en api-semillas.mjs.
 //
 // Los datos están en db/semillas/bandas: `catalogo.json`, las fotos y sus créditos.
 
 import { readFileSync } from 'node:fs';
 
+import { API, CUENTAS, clave, crearVariantes, escaparXml, iniciarSesion, llamar, ponerPrecios } from './api-semillas.mjs';
+
 const CARPETA = new URL('../../../db/semillas/bandas/', import.meta.url);
-const API = (process.env.API_URL ?? 'http://localhost:3000/api/v1').replace(/\/+$/, '');
-const CUENTAS = {
-  bodega: { email: process.env.BODEGA_EMAIL ?? 'bodega@rockstar.cl', password: process.env.BODEGA_PASSWORD ?? 'bodega123' },
-  gerente: { email: process.env.GERENTE_EMAIL ?? 'gerente@rockstar.cl', password: process.env.GERENTE_PASSWORD ?? 'gerente123' },
-};
-
-/** Nombre en minúsculas, sin tildes ni signos: para comparar y para armar claves. */
-const clave = (texto) =>
-  texto
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-
-async function llamar(metodo, ruta, cuerpo, token) {
-  const respuesta = await fetch(`${API}${ruta}`, {
-    method: metodo,
-    headers: {
-      ...(cuerpo === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
-  });
-  const datos = await respuesta.json().catch(() => ({}));
-  if (!respuesta.ok) {
-    throw new Error(`${metodo} ${ruta} respondió ${respuesta.status}: ${datos.mensaje ?? 'sin detalle'}`);
-  }
-  return datos;
-}
-
-async function iniciarSesion({ email, password }) {
-  return (await llamar('POST', '/usuarios/auth/login', { email, password })).accessToken;
-}
-
-const escaparXml = (texto) => texto.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]);
 
 /** Parte un título en renglones de hasta `ancho` caracteres, sin cortar palabras. */
 function renglones(texto, ancho) {
@@ -122,51 +87,10 @@ for (const banda of catalogo.bandas) {
   fotos++;
 }
 
-// --- Productos ---
+// --- Productos, con su precio y descripción ---
 
-const variantes = await llamar('GET', '/inventario/productos', undefined, bodega);
-const existe = (producto, talla, color) =>
-  variantes.some((v) => clave(v.producto) === clave(producto) && clave(v.talla) === clave(talla) && clave(v.color) === clave(color));
-
-let creadas = 0;
-for (const producto of catalogo.productos) {
-  for (const [talla, cantidad] of Object.entries(producto.tallas)) {
-    if (existe(producto.nombre, talla, producto.color)) {
-      continue;
-    }
-    await llamar(
-      'POST',
-      '/inventario/productos',
-      {
-        // La misma clave en cada ejecución: si esta se corta a medias, repetirla no duplica nada.
-        claveIdempotencia: `semilla-bandas:${clave(producto.nombre)}:${clave(talla)}`,
-        nombre: producto.nombre,
-        categoria: producto.categoria,
-        banda: producto.banda,
-        talla,
-        color: producto.color,
-        cantidad,
-        ubicacion: 'BODEGA',
-        imagen: ilustracion(producto),
-      },
-      bodega,
-    );
-    creadas++;
-  }
-}
-
-// --- Precio y descripción ---
-
-const alDia = await llamar('GET', '/inventario/productos', undefined, bodega);
-let conPrecio = 0;
-for (const producto of catalogo.productos) {
-  const variante = alDia.find((v) => clave(v.producto) === clave(producto.nombre));
-  // Solo se le pone precio al producto que no lo tiene: uno ya definido por el Gerente se respeta.
-  if (variante && variante.precio === null) {
-    await llamar('PATCH', `/inventario/productos/${variante.idProducto}`, { precio: producto.precio, descripcion: producto.descripcion }, gerente);
-    conPrecio++;
-  }
-}
+const creadas = await crearVariantes(catalogo.productos, { prefijo: 'semilla-bandas', ilustracion }, bodega);
+const conPrecio = await ponerPrecios(catalogo.productos, bodega, gerente);
 
 console.log(`Fotos de bandas guardadas: ${fotos} de ${catalogo.bandas.length}`);
 console.log(`Variantes creadas: ${creadas} de ${catalogo.productos.reduce((n, p) => n + Object.keys(p.tallas).length, 0)}`);

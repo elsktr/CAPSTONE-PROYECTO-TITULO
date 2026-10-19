@@ -11,9 +11,11 @@
     "test.unit": "vitest",
     "test.terminal": "node --test terminal-simulada/servidor.test.mjs",
     "lint": "eslint",
-    "dev:up": "docker compose up --build"
+    "dev:up": "docker compose up --build",
+    "apk": "node scripts/apk.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "8.5.2",
     "@capacitor/app": "8.1.2",
     "@capacitor/core": "8.5.2",
     "@capacitor/haptics": "8.0.2",

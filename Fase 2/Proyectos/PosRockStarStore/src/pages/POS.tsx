@@ -22,14 +22,12 @@ import {
   IonText,
   IonSegment,
   IonSegmentButton,
-  IonRadio,
-  IonRadioGroup,
   IonToast,
 } from '@ionic/react';
 import { useAuth } from '../contexts/AuthContext';
 import { getCatalogo, ArticuloCatalogo, registrarVentaPos, getVentasPos, ComprobantePos, ErrorApi, LineaEnBodega, MedioPresencial, getImageUrl, buscarPorCodigo } from '../lib/api';
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { cartOutline, logOutOutline, refreshOutline, receiptOutline, addOutline, removeOutline, warningOutline, checkmarkCircleOutline, closeCircleOutline, cashOutline, cardOutline, printOutline, timeOutline, listOutline, homeOutline, personCircleOutline } from 'ionicons/icons';
+import { cartOutline, logOutOutline, refreshOutline, receiptOutline, addOutline, removeOutline, warningOutline, checkmarkCircleOutline, closeCircleOutline, cardOutline, walletOutline, printOutline, timeOutline, listOutline, homeOutline, personCircleOutline } from 'ionicons/icons';
 import { formatCLP } from '../utils/format';
 import { ProductImage } from '../components/ProductImage';
 import { EmptyState, ErrorAlert, SkeletonGrid } from '../components/FeedbackStates';
@@ -37,18 +35,10 @@ import { EscanerCamara, ResultadoLectura } from '../components/EscanerCamara';
 import { BarraEscaneo } from '../components/BarraEscaneo';
 import { porSku } from '../utils/busqueda';
 import { CobroEnMaquina } from '../components/CobroEnMaquina';
+import { SelectorPago } from '../components/SelectorPago';
+import { CierreCajaModal } from '../components/CierreCajaModal';
 import { AjustesMaquina } from '../components/AjustesMaquina';
 import { CobroMaquina, ConfigMaquina, guardarConfigMaquina, leerConfigMaquina, maquinaHttp, pagoParaVenta, tipoTarjeta } from '../lib/terminal';
-
-/**
- * Con la maquina de cobro activa, la tarjeta se cobra enviandole el monto. Sin ella, se
- * pasa por un terminal aparte y el POS solo registra con que se pago.
- */
-const MEDIOS_PAGO: { codigo: MedioPresencial; nombre: string; descripcion: string; icono: string }[] = [
-  { codigo: 'EFECTIVO', nombre: 'Efectivo', descripcion: 'Pago en caja', icono: cashOutline },
-  { codigo: 'DEBITO_PRESENCIAL', nombre: 'Tarjeta de débito', descripcion: 'Cobrar en el terminal de la tienda', icono: cardOutline },
-  { codigo: 'CREDITO_PRESENCIAL', nombre: 'Tarjeta de crédito', descripcion: 'Cobrar en el terminal de la tienda', icono: cardOutline },
-];
 
 const POS: React.FC = () => {
   const { vendedor, logout, cliente, setCliente } = useAuth();
@@ -71,6 +61,10 @@ const POS: React.FC = () => {
   const [showCheckoutError, setShowCheckoutError] = useState(false);
   const [medioPago, setMedioPago] = useState<MedioPresencial>('EFECTIVO');
   const [showMedioPagoModal, setShowMedioPagoModal] = useState(false);
+  // Efectivo: lo que entrega el cliente, para el vuelto. Transferencia: su numero de operacion.
+  const [montoRecibido, setMontoRecibido] = useState<number | null>(null);
+  const [numeroOperacion, setNumeroOperacion] = useState('');
+  const [showCierreCaja, setShowCierreCaja] = useState(false);
   // Clave de la venta en curso. En un ref y no en estado: al anular un cobro y seguir en
   // el mismo clic, la venta debe salir con la clave nueva, no con la del render anterior.
   const claveVenta = useRef('');
@@ -225,7 +219,11 @@ const POS: React.FC = () => {
   /** El cliente es opcional: se identifica, si quiere, dentro del cobro. */
   const handleCobrar = () => {
     // Con un cobro ya aprobado se conserva la clave: reintentar no duplica la venta.
-    if (!cobroAprobado) claveVenta.current = crypto.randomUUID();
+    if (!cobroAprobado) {
+      claveVenta.current = crypto.randomUUID();
+      setMontoRecibido(null);
+      setNumeroOperacion('');
+    }
     setShowMedioPagoModal(true);
   };
 
@@ -252,6 +250,7 @@ const POS: React.FC = () => {
         idCliente: cliente?.usuario.id,
         // La autorizacion queda guardada con la venta en el backend.
         pagoMaquina: cobro ? pagoParaVenta(cobro) : undefined,
+        numeroOperacion: medioPago === 'TRANSFERENCIA' && numeroOperacion ? numeroOperacion : undefined,
       });
       mostrarBoleta(comprobante);
       setCobroAprobado(null);
@@ -338,6 +337,11 @@ const POS: React.FC = () => {
       })),
       total: comprobante.total,
       medioPago: comprobante.medioPago.nombre,
+      numeroOperacion: comprobante.numeroOperacion,
+      // El vuelto no se guarda: es del momento, para la boleta.
+      efectivo: comprobante.medioPago.codigo === 'EFECTIVO' && montoRecibido !== null
+        ? { recibido: montoRecibido, vuelto: montoRecibido - comprobante.total }
+        : null,
       // Lo que guardo el backend, no lo que dijo la maquina: la boleta refleja el registro.
       pagoMaquina: pago ? { autorizacion: pago.codigoAutorizacion, tarjeta: pago.ultimosDigitos ? `•••• ${pago.ultimosDigitos}` : 'tarjeta' } : null,
       giro: 'Rockstar Store SpA - Gira Musical y Merchandising',
@@ -394,6 +398,8 @@ const POS: React.FC = () => {
           <div class="linea total"><span>TOTAL</span><span>${formatCLP(boletaData.total)}</span></div>
           <div class="linea"><span>Medio de pago</span><span>${boletaData.medioPago}</span></div>
           ${boletaData.pagoMaquina ? `<div class="linea"><span>Autorización</span><span>${boletaData.pagoMaquina.autorizacion} · ${boletaData.pagoMaquina.tarjeta}</span></div>` : ''}
+          ${boletaData.numeroOperacion ? `<div class="linea"><span>N° operación</span><span>${boletaData.numeroOperacion}</span></div>` : ''}
+          ${boletaData.efectivo ? `<div class="linea"><span>Recibido</span><span>${formatCLP(boletaData.efectivo.recibido)}</span></div><div class="linea"><span>Vuelto</span><span>${formatCLP(boletaData.efectivo.vuelto)}</span></div>` : ''}
         </div>
         <div class="giro">
           <p>${boletaData.giro}</p>
@@ -449,6 +455,8 @@ const POS: React.FC = () => {
 
   /** Tarjeta que se cobra en la maquina, si esta activa y el medio es debito o credito. */
   const tarjetaEnMaquina = configMaquina.activa ? tipoTarjeta(medioPago) : null;
+  /** En efectivo, con un monto recibido menor al total no se puede confirmar. */
+  const faltaEfectivo = medioPago === 'EFECTIVO' && montoRecibido !== null && montoRecibido < total;
 
   const handleMedioPagoConfirmar = async () => {
     let cobro = cobroAprobado;
@@ -499,6 +507,9 @@ const POS: React.FC = () => {
           <IonButtons slot="start">
             <IonButton onClick={cargarCatalogo} fill="clear" aria-label="Actualizar catálogo" className="recargar-btn">
               <IonIcon icon={refreshOutline} />
+            </IonButton>
+            <IonButton onClick={() => setShowCierreCaja(true)} fill="clear" aria-label="Cierre de caja" className="cierre-btn">
+              <IonIcon icon={walletOutline} />
             </IonButton>
             <IonButton onClick={() => { setShowRegistro(true); cargarRegistro(); }} fill="clear" aria-label="Registro de jornada" className="registro-btn">
               <IonIcon icon={listOutline} />
@@ -782,27 +793,23 @@ const POS: React.FC = () => {
             )}
 
             <h3 className="cobro-subtitulo">Medio de pago</h3>
-            <IonRadioGroup value={medioPago} onIonChange={(e: any) => setMedioPago(e.detail.value)}>
-              <IonList>
-                {MEDIOS_PAGO.map((medio) => (
-                  <IonItem key={medio.codigo}>
-                    <IonRadio slot="start" value={medio.codigo} />
-                    <IonLabel>
-                      <div className="medio-pago-option">
-                        <IonIcon icon={medio.icono} slot="start" color={medio.codigo === 'EFECTIVO' ? 'primary' : 'tertiary'} />
-                        <div>
-                          <strong>{medio.nombre}</strong>
-                          <p className="medio-pago-desc">
-                            {configMaquina.activa && medio.codigo !== 'EFECTIVO' ? 'Se cobra en la máquina de cobro' : medio.descripcion}
-                          </p>
-                        </div>
-                      </div>
-                    </IonLabel>
-                  </IonItem>
-                ))}
-              </IonList>
-            </IonRadioGroup>
-            <IonButton expand="block" color="primary" onClick={() => void handleMedioPagoConfirmar()} disabled={checkoutLoading} className="mt-16 confirmar-cobro">
+            <SelectorPago
+              total={total}
+              medio={medioPago}
+              onMedio={setMedioPago}
+              maquinaActiva={configMaquina.activa}
+              recibido={montoRecibido}
+              onRecibido={setMontoRecibido}
+              numeroOperacion={numeroOperacion}
+              onNumeroOperacion={setNumeroOperacion}
+            />
+            <IonButton
+              expand="block"
+              color="primary"
+              onClick={() => void handleMedioPagoConfirmar()}
+              disabled={checkoutLoading || faltaEfectivo}
+              className="mt-16 confirmar-cobro"
+            >
               {checkoutLoading ? (
                 <IonSpinner name="crescent" />
               ) : tarjetaEnMaquina && !cobroAprobado ? (
@@ -810,6 +817,8 @@ const POS: React.FC = () => {
                   <IonIcon icon={cardOutline} slot="start" />
                   Cobrar {formatCLP(total)} en la máquina
                 </>
+              ) : medioPago === 'TRANSFERENCIA' ? (
+                'Transferencia recibida: confirmar'
               ) : (
                 'Confirmar y pagar'
               )}
@@ -833,6 +842,18 @@ const POS: React.FC = () => {
             procesarVenta([], null);
           }}
         />
+
+        {vendedor && (
+          <CierreCajaModal
+            isOpen={showCierreCaja}
+            accessToken={vendedor.accessToken}
+            onClose={() => setShowCierreCaja(false)}
+            onCerrada={(cierre) => {
+              setAviso({ ok: true, mensaje: `Caja cerrada: ${cierre.ventas} ventas por ${formatCLP(cierre.total)}.` });
+              void cargarRegistro();
+            }}
+          />
+        )}
 
         <AjustesMaquina
           isOpen={showAjustesMaquina}
@@ -876,6 +897,13 @@ const POS: React.FC = () => {
                   <div><strong>Vendedor</strong><span>{boletaData.vendedor}</span></div>
                   {boletaData.cliente && <div><strong>Cliente</strong><span>{boletaData.cliente}</span></div>}
                   <div><strong>Medio de pago</strong><span>{boletaData.medioPago}</span></div>
+                  {boletaData.numeroOperacion && <div><strong>N° operación</strong><span>{boletaData.numeroOperacion}</span></div>}
+                  {boletaData.efectivo && (
+                    <>
+                      <div><strong>Recibido</strong><span>{formatCLP(boletaData.efectivo.recibido)}</span></div>
+                      <div><strong>Vuelto</strong><span>{formatCLP(boletaData.efectivo.vuelto)}</span></div>
+                    </>
+                  )}
                   {boletaData.pagoMaquina && (
                     <div><strong>Autorización</strong><span>{boletaData.pagoMaquina.autorizacion} · {boletaData.pagoMaquina.tarjeta}</span></div>
                   )}

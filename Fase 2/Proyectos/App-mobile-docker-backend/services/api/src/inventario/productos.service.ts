@@ -12,9 +12,11 @@ import { ErrorDeNegocio, cuerpoComo, esEnteroPositivo, exigir, noEncontrado, tex
 import { claveDe } from '../comun/texto.js';
 import { BaseDeDatos, type Ejecutor } from '../db/base-de-datos.js';
 import { CatalogosService } from './catalogos.service.js';
-import { variantesConStock, variantesDeGestion } from './consultas.js';
+import { MES_ACTUAL, variantesConStock, variantesDeGestion } from './consultas.js';
 import { StockService } from './stock.service.js';
 import { codigoDeUbicacion, codigosDeVariante, esUbicacion } from './ubicaciones.js';
+
+const LARGO_MAXIMO_ESTAMPADO = 60;
 
 interface ProductoExistente {
   id: number;
@@ -31,10 +33,10 @@ export class ProductosService {
   ) {}
 
   /**
-   * Cambia el precio o la descripción de un producto; solo los campos que vienen en el
-   * cuerpo. Sin precio, el producto deja de ofrecerse en la tienda web.
+   * Cambia el precio, la oferta del mes, la descripción o el tipo de estampado de un
+   * producto; solo los campos que vienen en el cuerpo. Sin precio, el producto deja de ofrecerse en la tienda web.
    */
-  async editar(idProducto: number, cuerpo: unknown): Promise<VarianteGestion[]> {
+  editar(idProducto: number, cuerpo: unknown, usuario: Usuario): Promise<VarianteGestion[]> {
     const datos = cuerpoComo<ProductoEdicionRequest>(cuerpo);
     const valores: unknown[] = [idProducto];
     const cambios: string[] = [];
@@ -48,16 +50,67 @@ export class ProductosService {
       valores.push(texto(datos.descripcion) || null);
       cambios.push(`descripcion = $${valores.length}`);
     }
-    exigir(cambios.length > 0, 'No hay cambios que aplicar.');
-
-    const [producto] = await this.db.consultar(
-      `UPDATE inventario.productos SET ${cambios.join(', ')} WHERE id_producto = $1 RETURNING id_producto`,
-      valores,
-    );
-    if (!producto) {
-      throw noEncontrado('El producto no existe.');
+    if (datos.tipoEstampado !== undefined) {
+      exigir(datos.tipoEstampado === null || typeof datos.tipoEstampado === 'string', 'El tipo de estampado no es válido.');
+      exigir(texto(datos.tipoEstampado).length <= LARGO_MAXIMO_ESTAMPADO, `El tipo de estampado puede tener hasta ${LARGO_MAXIMO_ESTAMPADO} caracteres.`);
+      valores.push(texto(datos.tipoEstampado) || null);
+      cambios.push(`tipo_estampado = $${valores.length}`);
     }
-    return variantesDeGestion(this.db, 'WHERE p.id_producto = $1', [idProducto]);
+    const { precioOferta } = datos;
+    exigir(
+      precioOferta === undefined || precioOferta === null || esEnteroPositivo(precioOferta),
+      'El precio de oferta debe ser un entero mayor que cero.',
+    );
+    exigir(cambios.length > 0 || precioOferta !== undefined, 'No hay cambios que aplicar.');
+
+    return this.db.transaccion(async (tx) => {
+      // La fila queda bloqueada: la oferta se valida contra el precio con que queda el producto.
+      const [producto] = await tx.consultar<{ precio: number | null }>(
+        cambios.length > 0
+          ? `UPDATE inventario.productos SET ${cambios.join(', ')} WHERE id_producto = $1 RETURNING precio`
+          : 'SELECT precio FROM inventario.productos WHERE id_producto = $1 FOR UPDATE',
+        valores,
+      );
+      if (!producto) {
+        throw noEncontrado('El producto no existe.');
+      }
+      await this.ajustarOferta(tx, idProducto, producto.precio, precioOferta, usuario);
+      return variantesDeGestion(tx, 'WHERE p.id_producto = $1', [idProducto]);
+    });
+  }
+
+  /**
+   * Deja la oferta de este mes como se pidió, siempre por debajo del precio normal. Si no
+   * se pidió nada sobre ella, verifica que la que hay siga siendo una rebaja.
+   */
+  private async ajustarOferta(
+    tx: Ejecutor,
+    idProducto: number,
+    precio: number | null,
+    precioOferta: number | null | undefined,
+    usuario: Usuario,
+  ): Promise<void> {
+    if (precioOferta === undefined && precio !== null) {
+      const [oferta] = await tx.consultar<{ precio_oferta: number }>(
+        `SELECT precio_oferta FROM inventario.ofertas WHERE id_producto = $1 AND mes = ${MES_ACTUAL}`,
+        [idProducto],
+      );
+      exigir(!oferta || oferta.precio_oferta < precio, 'El precio debe ser mayor que el precio de oferta de este mes.');
+      return;
+    }
+    if (precioOferta === undefined || precioOferta === null) {
+      // Se quitó la oferta, o el producto quedó sin precio y fuera de la tienda.
+      await tx.consultar(`DELETE FROM inventario.ofertas WHERE id_producto = $1 AND mes = ${MES_ACTUAL}`, [idProducto]);
+      return;
+    }
+    exigir(precio !== null, 'Un producto sin precio no puede estar en oferta.');
+    exigir(precioOferta < precio, 'El precio de oferta debe ser menor que el precio normal.');
+    await tx.consultar(
+      `INSERT INTO inventario.ofertas (id_producto, mes, precio_oferta, id_usuario) VALUES ($1, ${MES_ACTUAL}, $2, $3)
+       ON CONFLICT (id_producto, mes)
+       DO UPDATE SET precio_oferta = EXCLUDED.precio_oferta, id_usuario = EXCLUDED.id_usuario, creada_en = now()`,
+      [idProducto, precioOferta, usuario.id],
+    );
   }
 
   /**
