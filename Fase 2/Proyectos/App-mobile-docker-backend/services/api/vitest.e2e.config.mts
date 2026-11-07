@@ -8,5 +8,8 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 60_000,
     fileParallelism: false,
+    // En Linux, pglite-socket consulta la base ya cerrada al soltar una conexión. Es de la
+    // librería y ocurre al terminar: no debe fallar la corrida. Otro error sí la falla.
+    onUnhandledError: (error) => !error.message?.includes('_IsTransactionBlock'),
   },
 });
