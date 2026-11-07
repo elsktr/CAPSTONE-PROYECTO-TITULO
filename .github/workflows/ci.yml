@@ -1,0 +1,93 @@
+# Corre las pruebas de cada pieza en cada push a main y en cada Pull Request.
+name: Pruebas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: pruebas-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BACKEND: Fase 2/Proyectos/App-mobile-docker-backend
+  POS: Fase 2/Proyectos/PosRockStarStore
+
+jobs:
+  api:
+    name: API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Instalar
+        working-directory: ${{ env.BACKEND }}
+        run: npm ci
+      - name: Pruebas unitarias
+        working-directory: ${{ env.BACKEND }}/services/api
+        run: npm test
+      - name: Pruebas de punta a punta
+        working-directory: ${{ env.BACKEND }}/services/api
+        run: npm run test:e2e
+
+  bodega:
+    name: App de bodega
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Instalar
+        working-directory: ${{ env.BACKEND }}
+        run: npm ci
+      - name: Pruebas
+        working-directory: ${{ env.BACKEND }}/apps/bodega-mobile
+        run: npm test
+
+  tienda:
+    name: Tienda web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Instalar
+        working-directory: ${{ env.BACKEND }}/apps/e-commerce
+        run: npm ci
+      - name: Pruebas
+        working-directory: ${{ env.BACKEND }}/apps/e-commerce
+        run: npm test
+
+  pos:
+    name: POS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Instalar
+        working-directory: ${{ env.POS }}
+        run: npm ci
+      - name: Pruebas unitarias
+        working-directory: ${{ env.POS }}
+        run: npx vitest run
+      - name: Pruebas de la máquina de cobro
+        working-directory: ${{ env.POS }}
+        run: npm run test.terminal
+      - name: Pruebas en el navegador
+        working-directory: ${{ env.POS }}
+        run: |
+          node terminal-simulada/servidor.mjs &
+          npx vite --port 8082 --strictPort &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8082 > /dev/null && curl -sf http://localhost:8090/api/estado > /dev/null && break
+            sleep 2
+          done
+          npx cypress run

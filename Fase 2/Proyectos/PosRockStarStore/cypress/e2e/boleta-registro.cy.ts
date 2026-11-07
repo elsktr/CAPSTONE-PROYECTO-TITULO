@@ -138,11 +138,15 @@ describe('POS - Boleta y Registro de Jornada', () => {
   it('debe refrescar catálogo tras venta (stock actualizado)', () => {
     // El catálogo tras la venta devuelve stock descontado en 1.
     cy.fixture('catalogo-integracion.json').then((base: Array<Record<string, unknown>>) => {
-      let llamadas = 0;
+      // La pantalla puede pedir el catálogo varias veces al iniciar: el stock baja solo tras la venta.
+      let vendido = false;
+      cy.intercept('POST', '/api/v1/ventas/pos', (req) => {
+        vendido = true;
+        req.reply(comprobante(103, 30000, EFECTIVO));
+      }).as('venta');
       cy.intercept('GET', '/api/v1/inventario/catalogo', (req) => {
-        llamadas++;
         const copia = structuredClone(base) as Array<Record<string, unknown>>;
-        if (llamadas > 1) {
+        if (vendido) {
           copia[0] = { ...copia[0], disponible: 6 };
         }
         req.reply(copia);
