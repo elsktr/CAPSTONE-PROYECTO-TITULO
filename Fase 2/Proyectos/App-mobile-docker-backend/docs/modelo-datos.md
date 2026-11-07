@@ -5,12 +5,12 @@ Base de datos PostgreSQL de Rockstar. Una sola instancia con un esquema por domi
 | Esquema | De qué es dueño | Tablas |
 |---|---|---|
 | `usuarios` | Cuentas, roles y sesiones | 3 |
-| `inventario` | Catálogo, existencias por ubicación, reservas y movimientos | 16 |
-| `ventas` | Ventas del POS y del e-commerce, sus líneas y sus costos | 6 |
+| `inventario` | Catálogo, existencias por ubicación, reservas y movimientos | 17 |
+| `ventas` | Ventas del POS y del e-commerce, sus líneas, sus costos y los cierres de caja | 7 |
 | `pagos` | Medios de pago y transacciones | 2 |
 | `logistica` | Destinos, pedidos, tarifas y despachos | 9 |
 
-Son 36 tablas, 48 claves foráneas, 52 restricciones `CHECK` y 26 de unicidad.
+Son 38 tablas, 52 claves foráneas, 74 restricciones `CHECK` y 29 de unicidad.
 
 Los diagramas del final se generan leyendo la estructura de la base, así que coinciden con las tablas reales.
 
@@ -34,6 +34,8 @@ Las tablas se definen en `db/migrations`, en archivos numerados. El backend apli
 | `012_conciertos_bandas` | Próximo concierto de cada banda en Chile: fecha y lugar |
 | `013_contacto_usuarios` | Teléfono y dirección de la cuenta, que el cliente entrega al registrarse |
 | `014_detalle_productos` | Tipo de estampado de cada producto y guía de tallas: ancho y largo por talla de cada categoría |
+| `015_pagos_maquina_cobro` | Datos del cobro hecho en la máquina de la tienda |
+| `016_transferencia_y_cierres_caja` | Transferencia bancaria como medio de pago y cierres de caja del POS |
 
 Una migración ya aplicada no se modifica: un cambio al modelo es siempre un archivo nuevo.
 

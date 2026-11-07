@@ -7,7 +7,7 @@
 | **Proyecto** | RockStore: plataforma omnicanal de inventario y ventas para una tienda de ropa estilo rock |
 | **Equipo** | Exequiel Tapia · Elías Figueroa · Jorge Piña |
 | **Repositorio** | [elsktr/CAPSTONE-PROYECTO-TITULO](https://github.com/elsktr/CAPSTONE-PROYECTO-TITULO) — código en [`Fase 2/Proyectos`](../Proyectos) |
-| **Documentos** | [Informe (Word)](<Evidencias de documentación/Informe_Avance_Fase2_RockStore.docx>) · [Presentación (PowerPoint)](<Evidencias de documentación/Presentacion_Avance_Fase2_RockStore.pptx>) · [Capturas del sistema](<Evidencias de sistema Aplicación Base de datos/capturas>) |
+| **Documentos** | [Informe (Word)](<Evidencias de documentación/Informe_Avance_Fase2_RockStore.docx>) · [Capturas del sistema](<Evidencias de sistema Aplicación Base de datos/capturas>) |
 
 ## Contenido
 
@@ -23,7 +23,7 @@
 
 En la Fase 2 el equipo pasó del diseño a una solución de software funcionando. Se construyeron e integraron cuatro componentes que comparten **una sola base de datos**:
 
-- una **API REST** en NestJS con 44 endpoints;
+- una **API REST** en NestJS con 53 endpoints;
 - una **app móvil de bodega** (Ionic Angular y Capacitor), instalable como APK en Android;
 - una **tienda web** (Ionic Angular), que incluye el panel del gerente;
 - un **punto de venta, POS** (Ionic React).
@@ -43,7 +43,7 @@ Todo el sistema se despliega con Docker Compose, en contenedores independientes,
 | Sincronizar el stock | ✅ Cumplido | Bodega, POS y tienda web descuentan del mismo inventario en PostgreSQL. La operación de stock bloquea las filas dentro de una transacción y no se duplica al reintentar, así que una prenda no se puede vender dos veces. |
 | Reducir las ventas perdidas | ✅ Cumplido | El catálogo web y el POS muestran la disponibilidad real. Si la sala de ventas no tiene unidades, el POS ofrece retirarlas de bodega. |
 | Mejorar la experiencia de compra | ✅ Cumplido y ampliado | Se sumaron un probador virtual 3D que recomienda la talla y Roxy, una asistente de soporte. |
-| Dar trazabilidad | ✅ Cumplido | Cada ingreso, merma, traspaso, conteo y venta queda registrado con su responsable. Las prendas y los espacios de bodega tienen código QR. |
+| Dar trazabilidad | ✅ Cumplido | Cada ingreso, merma y venta queda registrado con su responsable. Las prendas y los espacios de bodega tienen código QR. |
 | Aumentar la rentabilidad con datos | 🟡 En curso | El panel de Finanzas muestra las ventas de cada canal, el ticket promedio, el margen y el balance diario de ingresos y gastos. Un modelo predictivo recomienda en qué invertir. Faltan algunos KPI, los reportes PDF/Excel y las integraciones reales de Webpay y Starken. |
 
 ### Avance del backlog
@@ -83,14 +83,14 @@ Las evidencias están en este repositorio, carpeta [`Fase 2/Proyectos`](../Proye
 
 | Componente | Ubicación | Qué incluye |
 |---|---|---|
-| API NestJS | `App-mobile-docker-backend/services/api` | Módulos de usuarios y roles, inventario, ventas, logística, pagos y analítica |
-| App de bodega | `App-mobile-docker-backend/apps/bodega-mobile` | 13 pantallas: ingreso, conteo, mermas, traspasos, búsqueda, espacios, etiquetas QR y envíos |
+| API NestJS | `App-mobile-docker-backend/services/api` | Módulos de usuarios y roles, inventario, ventas, logística, pagos, analítica y asesor de inversión |
+| App de bodega | `App-mobile-docker-backend/apps/bodega-mobile` | 10 pantallas: ingreso, búsqueda, edición de productos, mermas, espacios, etiquetas QR y envíos |
 | Tienda web | `App-mobile-docker-backend/apps/e-commerce` | Catálogo, carrito, pago, pedidos, probador 3D, soporte con Roxy, Finanzas e Inversión |
-| POS | `PosRockStarStore` | Venta, boleta, escáner, cobro con máquina de tarjeta y registro de jornada |
+| POS | `PosRockStarStore` | Venta, boleta, escáner, cobro en efectivo, con tarjeta o transferencia, cierre de caja y app Android |
 
 #### Almacenamiento de datos
 
-PostgreSQL 17 con **5 esquemas** (usuarios, inventario, ventas, pagos y logística), **36 tablas** y **11 migraciones** versionadas en `db/migrations`. Tiene restricciones de integridad, claves de idempotencia y bloqueo de filas para el stock.
+PostgreSQL 17 con **5 esquemas** (usuarios, inventario, ventas, pagos y logística), **38 tablas** y **16 migraciones** versionadas en `db/migrations`. Tiene restricciones de integridad, claves de idempotencia y bloqueo de filas para el stock.
 
 #### Documentación
 
@@ -101,14 +101,16 @@ PostgreSQL 17 con **5 esquemas** (usuarios, inventario, ventas, pagos y logísti
 
 #### Resguardo de la calidad
 
-- **Pruebas automatizadas, 581 casos:**
+- **Pruebas automatizadas, 609 aprobadas de 611:**
 
   | Componente | Pruebas |
   |---|---|
-  | API (unitarias y de punta a punta, incluida una de concurrencia del stock) | 191 |
-  | App de bodega | 251 |
-  | POS (unitarias, Cypress y máquina de cobro simulada) | 87 |
-  | Tienda web | 52 |
+  | API (unitarias y de punta a punta, incluida una de concurrencia del stock) | 230 |
+  | App de bodega | 220 |
+  | POS (unitarias, Cypress y máquina de cobro simulada) | 101 |
+  | Tienda web | 58 |
+
+  Medido el 7 de noviembre sobre `main`. Dos pruebas de Cypress del POS no pasan: `maquina-cobro-real` necesita el contenedor `terminal`, y `boleta-registro` está desactualizada porque la pantalla ahora pide el catálogo dos veces al iniciar.
 
 - **Seguridad:**
   - contraseñas con Argon2id;
@@ -139,9 +141,9 @@ PostgreSQL 17 con **5 esquemas** (usuarios, inventario, ventas, pagos y logísti
 |---|---|---|---|---|---|---|---|
 | Gestionar proyectos informáticos | Planificación: backlog de 20 historias de usuario con Gherkin y métricas, tablero Trello y sprints | Trello, OpenSpec | 2 semanas (septiembre) | Todo el equipo | Facilitador: la propuesta de Fase 1 ya definía problema, KPI y alcance | ✅ Completado | Se agregaron las historias US-21 a US-27 |
 | Desarrollar una solución de software | Diseño de la arquitectura | NestJS, Docker, OpenSpec | 2 semanas (septiembre) | Exequiel Tapia | Dificultad: un gateway con 5 microservicios exigía mucha infraestructura para 3 integrantes | ✅ Completado | API única dividida en módulos por área, con contratos compartidos |
-| Construir modelos de datos | Modelo de datos y migraciones en PostgreSQL | PostgreSQL 17, SQL | 2 semanas (septiembre) | Jorge Piña y Elías Figueroa | Facilitador: el modelo relacional de Fase 1 sirvió de base | ✅ Completado | 5 esquemas, 36 tablas y 11 migraciones; se sumaron pagos con máquina de cobro e imágenes |
+| Construir modelos de datos | Modelo de datos y migraciones en PostgreSQL | PostgreSQL 17, SQL | 2 semanas (septiembre) | Jorge Piña y Elías Figueroa | Facilitador: el modelo relacional de Fase 1 sirvió de base | ✅ Completado | 5 esquemas, 38 tablas y 16 migraciones; se sumaron pagos con máquina de cobro e imágenes |
 | Desarrollar una solución de software | Autenticación y control de acceso por rol | JWT RS256, Argon2id | 1 semana (septiembre) | Elías Figueroa | Dificultad: Firebase agregaba una dependencia externa al manejo de roles | ✅ Completado | Autenticación propia en la API en lugar de Firebase |
-| Desarrollar una solución de software | App de bodega: ingreso, inventario, mermas, traspasos, conteos y QR | Ionic Angular, Capacitor | 4 semanas (sept.–oct.) | Elías Figueroa y Jorge Piña | Facilitador: modo de demostración que funciona sin servidor | ✅ Completado | Se genera un APK instalable en Android |
+| Desarrollar una solución de software | App de bodega: ingreso, inventario, mermas, ubicaciones, envíos y QR | Ionic Angular, Capacitor | 4 semanas (sept.–oct.) | Elías Figueroa y Jorge Piña | Facilitador: modo de demostración que funciona sin servidor | ✅ Completado | Se genera un APK instalable en Android |
 | Desarrollar una solución de software | Punto de venta: venta, comprobante, escáner y cobro con tarjeta | Ionic React, Vite, Cypress | 4 semanas (octubre) | Jorge Piña y Exequiel Tapia | Dificultad: falla al confirmar con Enter en "Identificar cliente" | ✅ Completado (falla en corrección) | Cliente opcional; la tarjeta se cobra en la máquina física |
 | Desarrollar una solución de software | Tienda web: catálogo, carrito, checkout y estado del pedido | Ionic Angular | 4 semanas (octubre) | Exequiel Tapia | Facilitador: contratos tipados compartidos con la API | ✅ Completado | Angular en lugar de React, igual que la app de bodega |
 | Desarrollar una solución de software | Integración con Webpay Plus y Starken | Adaptadores en la API | 3 semanas (oct.–nov.) | Elías Figueroa | Dificultad: aún no hay credenciales de Transbank ni cuenta en Starken | 🔁 En curso (simulados) | Adaptadores intercambiables; se usarán credenciales de integración |
@@ -151,7 +153,7 @@ PostgreSQL 17 con **5 esquemas** (usuarios, inventario, ventas, pagos y logísti
 | Desarrollar una solución de software | Asistente de soporte Roxy | Angular, Vitest | 1 semana (octubre) | Elías Figueroa | Facilitador: catálogo y pedidos ya disponibles en la API | ✅ Completado | Actividad nueva (US-27) |
 | Desarrollar una solución de software | Reportes PDF/Excel (US-19) | API de ventas | 2 semanas (noviembre) | Exequiel Tapia | Depende del panel de Finanzas | ⏳ No iniciado | Se reprograma para noviembre |
 | Desarrollar una solución de software | Alertas de stock crítico (US-20) | API de inventario, app de bodega | 2 semanas (noviembre) | Jorge Piña | Requiere definir un stock mínimo por producto | ⏳ No iniciado | Se reprograma para noviembre |
-| Realizar pruebas de certificación de productos y procesos | Pruebas automatizadas unitarias y de punta a punta | Vitest, Cypress, PostgreSQL embebido | Continuo | Todo el equipo | Facilitador: entorno local con base en memoria | 🟢 En curso (581 pruebas) | Se adoptó como criterio de "terminado" |
+| Realizar pruebas de certificación de productos y procesos | Pruebas automatizadas unitarias y de punta a punta | Vitest, Cypress, PostgreSQL embebido | Continuo | Todo el equipo | Facilitador: entorno local con base en memoria | 🟢 En curso (609 pruebas aprobadas) | Se adoptó como criterio de "terminado" |
 | Gestionar proyectos informáticos | Repositorio, ramas y CI (US-04) | GitHub, GitHub Actions | 1 semana (noviembre) | Exequiel Tapia | Dificultad: sin pipeline, las pruebas se corren a mano | 🟡 En curso | Falta el workflow que bloquee la fusión si fallan |
 | Desarrollar una solución de software | Implantación con Docker | Docker Compose | 1 semana (octubre) | Todo el equipo | Dificultad: configuración de Docker y WSL en Windows | ✅ Completado | Sistema completo en contenedores con un comando |
 | Gestionar proyectos informáticos | Piloto y capacitación | Tienda, equipo de bodega | 2 semanas (diciembre) | Todo el equipo | Requiere el sistema estable y las integraciones reales | ⏳ No iniciado (según plan) | Sin ajustes |
@@ -208,7 +210,7 @@ The main objective of Phase 1 has been achieved: stock is now synchronized acros
 
 Several adjustments were made along the way. The API gateway with five microservices was replaced by a single modular API, which keeps the separation by business area while reducing the infrastructure that a three-person team has to maintain. Firebase Authentication was replaced by in-house authentication based on RS256-signed JWTs and Argon2id password hashing. Since the Transbank and Starken credentials are still pending, payments and shipping run behind simulated adapters that can be swapped for the real services without changing the rest of the system.
 
-The team also delivered features beyond the original scope: a 3D virtual fitting room that recommends a size based on the customer's height, weight and body measurements; Roxy, a rule-based support assistant that answers with real catalog and order data; a manager dashboard with a daily income and expense balance for each sales channel; and a demand forecasting model that recommends where to invest. Quality is backed by 581 automated tests. The remaining work for the next sprints includes PDF/Excel reports, low-stock alerts, continuous integration, the real payment and shipping integrations, and user testing before the pilot.
+The team also delivered features beyond the original scope: a 3D virtual fitting room that recommends a size based on the customer's height, weight and body measurements; Roxy, a rule-based support assistant that answers with real catalog and order data; a manager dashboard with a daily income and expense balance for each sales channel; and a demand forecasting model that recommends where to invest. Quality is backed by 609 passing automated tests. The remaining work for the next sprints includes PDF/Excel reports, low-stock alerts, continuous integration, the real payment and shipping integrations, and user testing before the pilot.
 
 ---
 
