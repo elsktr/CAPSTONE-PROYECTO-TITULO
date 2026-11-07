@@ -154,7 +154,7 @@ PostgreSQL 17 con **5 esquemas** (usuarios, inventario, ventas, pagos y logísti
 | Desarrollar una solución de software | Reportes PDF/Excel (US-19) | API de ventas | 2 semanas (noviembre) | Exequiel Tapia | Depende del panel de Finanzas | ⏳ No iniciado | Se reprograma para noviembre |
 | Desarrollar una solución de software | Alertas de stock crítico (US-20) | API de inventario, app de bodega | 2 semanas (noviembre) | Jorge Piña | Requiere definir un stock mínimo por producto | ⏳ No iniciado | Se reprograma para noviembre |
 | Realizar pruebas de certificación de productos y procesos | Pruebas automatizadas unitarias y de punta a punta | Vitest, Cypress, PostgreSQL embebido | Continuo | Todo el equipo | Facilitador: entorno local con base en memoria | 🟢 En curso (611 pruebas) | Se adoptó como criterio de "terminado" |
-| Gestionar proyectos informáticos | Repositorio, ramas y CI (US-04) | GitHub, GitHub Actions | 1 semana (noviembre) | Exequiel Tapia | Dificultad: sin pipeline, las pruebas se corren a mano | 🟡 En curso | Falta el workflow que bloquee la fusión si fallan |
+| Gestionar proyectos informáticos | Repositorio, ramas y CI (US-04) | GitHub, GitHub Actions | 1 semana (noviembre) | Exequiel Tapia | Facilitador: el workflow corre las 611 pruebas en cada push y Pull Request | 🟡 En curso | Falta proteger main para bloquear la fusión si fallan |
 | Desarrollar una solución de software | Implantación con Docker | Docker Compose | 1 semana (octubre) | Todo el equipo | Dificultad: configuración de Docker y WSL en Windows | ✅ Completado | Sistema completo en contenedores con un comando |
 | Gestionar proyectos informáticos | Piloto y capacitación | Tienda, equipo de bodega | 2 semanas (diciembre) | Todo el equipo | Requiere el sistema estable y las integraciones reales | ⏳ No iniciado (según plan) | Sin ajustes |
 
@@ -195,7 +195,7 @@ No se eliminaron actividades del plan original.
 | Actividad | Por qué | Estrategia |
 |---|---|---|
 | Reportes PDF/Excel (US-19) y alertas de stock crítico (US-20) | Se priorizaron el panel de Finanzas y el modelo predictivo, de los que dependen | Desarrollarlas en noviembre, reutilizando las consultas de ventas y de inventario que ya existen |
-| Integración continua (US-04) | Pendiente | Un workflow de GitHub Actions que ejecute lint, compilación y pruebas en cada Pull Request, y proteger la rama `main` |
+| Integración continua (US-04) | El workflow de GitHub Actions ya corre las pruebas; falta bloquear la fusión | Proteger la rama `main` para exigir que las pruebas pasen antes de fusionar |
 | Webpay y Starken reales (US-14 y US-16) | Falta de credenciales | Usar el ambiente de integración de Transbank y solicitar la cuenta comercial de Starken. El cambio se limita a los adaptadores |
 | KPI pendientes (US-18) | Clientes distintos, despachos en 24 h y exactitud del inventario | Calcularlos con datos que la base ya registra |
 | Validación con usuarios | Requiere el sistema estable | Probar el probador con 10 personas (meta: acertar la talla en 8 de 10) y medir el tiempo de búsqueda (meta: 1,5 min o menos), antes del piloto |
