@@ -76,7 +76,7 @@ Escribe directo en PostgreSQL (`DATABASE_URL`, por defecto la base de `docker co
 
 Un producto creado desde la bodega no aparece en la tienda hasta que el Gerente le pone precio: en la tienda, "Acceso administrador", pestaña Bodega, botón Editar.
 
-Los pagos y los despachos son simulados: la tienda no cobra dinero y el código de seguimiento no existe en Starken. Ambos están detrás de adaptadores (`services/api/src/pagos/pasarela.ts` y `services/api/src/logistica/transportista.ts`) que se reemplazan al tener credenciales de Transbank y de Starken.
+La tienda cobra con **Webpay Plus** de Transbank (`services/api/src/pagos/pasarela.ts`). Con `docker compose` usa el ambiente de integración de Transbank: Webpay real, pero solo con tarjetas de prueba y sin dinero (VISA `4051 8856 0044 6623`, CVV `123`, RUT `11.111.111-1`, clave `123`). `WEBPAY_AMBIENTE` lo cambia a `simulada` (no sale a Transbank) o a `produccion` (con el código de comercio y la llave propios; ver `.env.example`). Los despachos siguen simulados: el código de seguimiento no existe en Starken, y el adaptador (`services/api/src/logistica/transportista.ts`) se reemplaza al tener credenciales.
 
 Otros comandos:
 

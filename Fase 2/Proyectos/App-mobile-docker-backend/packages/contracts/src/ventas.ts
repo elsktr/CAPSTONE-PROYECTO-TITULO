@@ -33,6 +33,11 @@ export interface CheckoutResponse {
   total: number;
   /** Identifica el pago en la pasarela; con él se informa el retorno. */
   tokenPago: string;
+  /**
+   * Formulario de Webpay al que se envía al comprador, por POST con `token_ws` = `tokenPago`.
+   * No viene con la pasarela simulada: entonces el resultado se elige en la tienda.
+   */
+  urlPago?: string;
   /** Hasta cuándo quedan reservadas las unidades. Pasado ese momento la compra expira. */
   expiraEn: string;
 }
@@ -50,6 +55,10 @@ export interface LineaSinDisponibilidad {
  *
  * Resuelve el pago al volver de la pasarela. Es idempotente por token: un pago ya
  * resuelto responde el resultado guardado.
+ *
+ * Webpay no vuelve a la tienda sino a GET o POST /pagos/webpay/vuelta (público), que
+ * redirige a `/pago` de la tienda con `token_ws`, más `anulado=1` si el comprador anuló el
+ * pago, o con `agotado=1` si se le acabó el tiempo en el formulario de Webpay.
  */
 export interface RetornoPagoRequest {
   tokenPago: string;
@@ -58,6 +67,8 @@ export interface RetornoPagoRequest {
    * Con la pasarela real el resultado lo informa ella y este campo se ignora.
    */
   aprobar?: boolean;
+  /** El comprador no terminó el pago en Webpay (lo anuló o se le acabó el tiempo): se cierra sin cobrar. */
+  anulado?: boolean;
 }
 
 export type EstadoCompra = 'PAGADA' | 'RECHAZADA' | 'EXPIRADA';

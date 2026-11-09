@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
+import { All, Body, Controller, Get, Headers, HttpCode, Post, Query, Redirect } from '@nestjs/common';
 import type {
   BalanceDia,
   CajaAbierta,
@@ -62,8 +62,9 @@ export class VentasController {
   /** Crea la compra, reserva las unidades e inicia el pago. Exige sesión de Cliente. */
   @Post('ventas/checkout')
   @Roles('CLIENTE')
-  checkout(@Body() cuerpo: unknown, @UsuarioActual() cliente: Usuario): Promise<CheckoutResponse> {
-    return this.compras.iniciar(cuerpo, cliente);
+  checkout(@Body() cuerpo: unknown, @UsuarioActual() cliente: Usuario, @Headers('origin') origen?: string): Promise<CheckoutResponse> {
+    // El navegador informa desde qué tienda se compra: allí debe volver al pagar en Webpay.
+    return this.compras.iniciar(cuerpo, cliente, origenWeb(origen));
   }
 
   /** La caja abierta del Vendedor: sus ventas sin cerrar, por medio de pago. */
@@ -103,5 +104,37 @@ export class VentasController {
   @HttpCode(200)
   retorno(@Body() cuerpo: unknown): Promise<ResultadoPago> {
     return this.compras.resolverPago(cuerpo);
+  }
+
+  /**
+   * Adonde Webpay devuelve al comprador, por GET o por POST de formulario. No resuelve el
+   * pago: lleva al comprador a la página de pago de la tienda, que lo informa a `retorno`.
+   * La redirección es relativa, así que vuelve a la misma tienda por la que llegó.
+   */
+  @All('pagos/webpay/vuelta')
+  @Publica()
+  @Redirect('/pago', 303)
+  vuelta(@Query() consulta: Record<string, unknown>, @Body() cuerpo: unknown): { url: string } {
+    const datos = { ...consulta, ...(typeof cuerpo === 'object' && cuerpo !== null ? cuerpo : {}) } as Record<string, unknown>;
+    const valor = (nombre: string) => (typeof datos[nombre] === 'string' ? (datos[nombre] as string) : '');
+    // Pago anulado: llega TBK_TOKEN. Pago terminado (aprobado o rechazado): solo token_ws.
+    // Tiempo agotado en el formulario: no llega token.
+    const anulado = valor('TBK_TOKEN');
+    if (anulado) {
+      return { url: `/pago?token_ws=${encodeURIComponent(anulado)}&anulado=1` };
+    }
+    const token = valor('token_ws');
+    return { url: token ? `/pago?token_ws=${encodeURIComponent(token)}` : '/pago?agotado=1' };
+  }
+}
+
+/** El origen `http(s)://host[:puerto]` de la cabecera Origin, o `undefined` si no es uno válido. */
+function origenWeb(origen: string | undefined): string | undefined {
+  if (!origen) return undefined;
+  try {
+    const url = new URL(origen);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : undefined;
+  } catch {
+    return undefined;
   }
 }

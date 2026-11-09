@@ -37,9 +37,12 @@ export class ShopApi {
     return firstValueFrom(this.http.post<CheckoutResponse>(`${API_URL}/ventas/checkout`, request));
   }
 
-  /** Informa el resultado del pago. `aprobar` solo lo usa la pasarela simulada. */
-  resolvePayment(tokenPago: string, aprobar: boolean): Promise<ResultadoPago> {
-    const body: RetornoPagoRequest = { tokenPago, aprobar };
+  /**
+   * Informa el resultado del pago. `aprobar` solo lo usa la pasarela simulada; `anulado`, que
+   * el comprador no terminó el pago en Webpay.
+   */
+  resolvePayment(tokenPago: string, options: Pick<RetornoPagoRequest, 'aprobar' | 'anulado'> = {}): Promise<ResultadoPago> {
+    const body: RetornoPagoRequest = { tokenPago, ...options };
     return firstValueFrom(this.http.post<ResultadoPago>(`${API_URL}/pagos/webpay/retorno`, body));
   }
 

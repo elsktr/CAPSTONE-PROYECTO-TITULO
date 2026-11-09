@@ -210,8 +210,8 @@ export class CartService {
    * unidades reservadas en el backend: aquí solo se la deja lista para la pantalla de pago.
    */
   resume(purchase: CompraPendiente): void {
-    const { idVenta, subtotal, flete, total, tokenPago, expiraEn, lineas } = purchase;
-    this.setPending({ idVenta, subtotal, flete, total, tokenPago, expiraEn });
+    const { idVenta, subtotal, flete, total, tokenPago, urlPago, expiraEn, lineas } = purchase;
+    this.setPending({ idVenta, subtotal, flete, total, tokenPago, ...(urlPago ? { urlPago } : {}), expiraEn });
     this.resumedLines = lineas.map((l) => ({ id: l.idVariante, qty: l.cantidad }));
     write(sessionStorage, RESUMED_KEY, this.resumedLines);
   }

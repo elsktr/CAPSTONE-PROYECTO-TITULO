@@ -17,7 +17,7 @@ Tienda online de ropa Rock & Metal, conectada al backend de Rockstar (`services/
 - Chat de soporte Roxy, con respuestas locales.
 - Probador 3D: el botón **Probar** de cada prenda abre un maniquí 3D con la altura y el peso del cliente, vestido con la talla elegida. Indica si queda apretada, bien u holgada y corta o larga, recomienda una talla y la agrega al carrito. Se abre con la talla recomendada. En las poleras esa talla no cambia sola: si el cliente sube el peso, la polera le queda chica (se sube y deja ver el abdomen) y el probador le aconseja subir de talla, con un botón para probarla. En las demás prendas la talla puesta sigue a la recomendada. Las medidas se recuerdan en el navegador y no se envían al backend.
 
-El pago es **simulado**: no se pide tarjeta ni se cobra. La pantalla de pago deja elegir si se aprueba o se rechaza.
+El pago es con **Webpay Plus**: la pantalla de pago envía al comprador al formulario de Transbank y, al volver (`/pago?token_ws=…`), muestra si la compra quedó pagada, rechazada o anulada. En el ambiente de integración muestra la tarjeta de prueba. Si el backend usa la pasarela simulada, la pantalla deja elegir si el pago se aprueba o se rechaza.
 
 ## Desarrollo
 
@@ -80,7 +80,7 @@ src/app/
     ├── shop/                Tienda; filtra por `?categoria=`, `?banda=`, `?talla=` y `?q=`
     ├── bandas/              Bandas en tarjetas
     ├── cart/                Abre la tienda con el carrito desplegado
-    ├── pago/                Pago simulado y resultado
+    ├── pago/                Pago con Webpay (o simulado) y resultado
     ├── pedidos/             Mis pedidos
     ├── perfil/              Datos de la cuenta, compras pendientes y compras hechas
     ├── warehouse/           Bodega (personal)

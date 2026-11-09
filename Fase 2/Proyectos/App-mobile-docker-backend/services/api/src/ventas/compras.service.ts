@@ -76,7 +76,8 @@ export class ComprasService implements OnModuleInit, OnModuleDestroy {
 
   // --- Checkout ---
 
-  async iniciar(cuerpo: unknown, cliente: Usuario): Promise<CheckoutResponse> {
+  /** `origen` es la dirección de la tienda desde la que se compra: allí vuelve el comprador al pagar. */
+  async iniciar(cuerpo: unknown, cliente: Usuario, origen?: string): Promise<CheckoutResponse> {
     const datos = cuerpoComo<CheckoutRequest>(cuerpo);
     exigir(typeof datos.claveIdempotencia === 'string' && datos.claveIdempotencia !== '', 'Falta la clave de idempotencia.');
     const lineas = this.lineasValidas(datos.lineas);
@@ -130,7 +131,7 @@ export class ComprasService implements OnModuleInit, OnModuleDestroy {
       );
       await tx.consultar('INSERT INTO ventas.costos_venta (id_venta, flete_cobrado) VALUES ($1, $2)', [idVenta, flete]);
 
-      const { token } = await this.pasarela.crear({ idVenta, monto: total });
+      const { token } = await this.pasarela.crear({ idVenta, monto: total, origen });
       await tx.consultar(`INSERT INTO pagos.transacciones (id_venta, monto, estado, token_webpay) VALUES ($1, $2, 'PENDIENTE', $3)`, [
         idVenta,
         total,
@@ -229,8 +230,14 @@ export class ComprasService implements OnModuleInit, OnModuleDestroy {
       flete: compra!.flete,
       total: compra!.total,
       tokenPago: compra!.token,
+      ...this.formularioDePago(),
       expiraEn: compra!.expira_en.toISOString(),
     };
+  }
+
+  /** Dónde se paga, si la pasarela tiene formulario propio (Webpay). */
+  private formularioDePago(): Pick<CheckoutResponse, 'urlPago'> {
+    return this.pasarela.urlFormulario ? { urlPago: this.pasarela.urlFormulario } : {};
   }
 
   // --- Retorno del pago ---
@@ -403,6 +410,7 @@ export class ComprasService implements OnModuleInit, OnModuleDestroy {
       flete: fila.flete,
       total: fila.total,
       tokenPago: fila.token,
+      ...this.formularioDePago(),
       expiraEn: fila.expira_en.toISOString(),
       fecha: fila.fecha.toISOString(),
       lineas: fila.lineas,
