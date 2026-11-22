@@ -1,7 +1,8 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { EstadoPedido, Pedido, Ubicacion, Usuario } from '@rockstar/contracts';
 
 import { ErrorDeNegocio, noEncontrado } from '../comun/errores.js';
+import { CONFIGURACION, type Configuracion } from '../config.js';
 import { BaseDeDatos, type Ejecutor } from '../db/base-de-datos.js';
 import { StockService, totalDe } from '../inventario/stock.service.js';
 import { pedidosConLineas } from './consultas.js';
@@ -31,40 +32,88 @@ const ID_ESTADO_DESPACHADO = `(SELECT id_estado FROM logistica.estados_pedido WH
  * despachado. Todo ocurre en una transacción: si algo falla, el pedido queda como estaba.
  */
 @Injectable()
-export class DespachosService {
+export class DespachosService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('Despachos');
+  private temporizador?: NodeJS.Timeout;
 
   constructor(
     private readonly db: BaseDeDatos,
     private readonly stock: StockService,
     @Inject(TRANSPORTISTA) private readonly transportista: Transportista,
+    @Inject(CONFIGURACION) private readonly configuracion: Configuracion,
   ) {}
 
-  generar(idPedido: number, usuario: Usuario): Promise<Pedido> {
-    return this.db.transaccion(async (tx) => {
-      // El bloqueo del pedido hace esperar a una segunda solicitud, que al entrar lo encuentra ya despachado.
-      const [bloqueado] = await tx.consultar('SELECT id_pedido FROM logistica.pedidos WHERE id_pedido = $1 FOR UPDATE', [idPedido]);
-      if (!bloqueado) {
-        throw noEncontrado('El pedido no existe.');
+  onModuleInit(): void {
+    this.temporizador = setInterval(() => {
+      this.reintentarPendientes().catch((error) => this.log.error(error instanceof Error ? (error.stack ?? error.message) : String(error)));
+    }, this.configuracion.starken.sincronizacionMs);
+    this.temporizador.unref();
+  }
+
+  onModuleDestroy(): void {
+    clearInterval(this.temporizador);
+  }
+
+  async generar(idPedido: number, usuario: Usuario): Promise<Pedido> {
+    try {
+      return await this.db.transaccion(async (tx) => {
+        // El bloqueo del pedido hace esperar a una segunda solicitud, que al entrar lo encuentra ya despachado.
+        const [bloqueado] = await tx.consultar('SELECT id_pedido FROM logistica.pedidos WHERE id_pedido = $1 FOR UPDATE', [idPedido]);
+        if (!bloqueado) {
+          throw noEncontrado('El pedido no existe.');
+        }
+        const [pedido] = await tx.consultar<PedidoPorDespachar>(
+          `SELECT pe.id_venta, es.codigo AS estado, ev.codigo = 'PAGADA' AS venta_pagada, pe.destinatario, pe.direccion,
+                  pe.telefono, co.nombre AS comuna, re.nombre AS region, pe.flete_cobrado
+           FROM logistica.pedidos pe
+           JOIN logistica.estados_pedido es ON es.id_estado = pe.id_estado
+           JOIN logistica.comunas co ON co.id_comuna = pe.id_comuna
+           JOIN logistica.regiones re ON re.id_region = co.id_region
+           JOIN ventas.ventas ve ON ve.id_venta = pe.id_venta
+           JOIN ventas.estados_venta ev ON ev.id_estado = ve.id_estado
+           WHERE pe.id_pedido = $1`,
+          [idPedido],
+        );
+        // Un pedido que ya tiene despacho no genera otro: se responde el que existe.
+        if (pedido!.estado !== 'DESPACHADO' && pedido!.estado !== 'ENTREGADO') {
+          await this.despachar(tx, idPedido, pedido!, usuario);
+        }
+        return (await pedidosConLineas(tx, 'WHERE pe.id_pedido = $1', [idPedido]))[0]!;
+      });
+    } catch (error) {
+      if (error instanceof ErrorDeNegocio && error.codigo === 'TRANSPORTISTA_NO_DISPONIBLE') {
+        // La transacción se deshizo; la cola vive fuera de ella para que el fallo no se pierda.
+        await this.registrarPendiente(idPedido, usuario, error.message);
       }
-      const [pedido] = await tx.consultar<PedidoPorDespachar>(
-        `SELECT pe.id_venta, es.codigo AS estado, ev.codigo = 'PAGADA' AS venta_pagada, pe.destinatario, pe.direccion,
-                pe.telefono, co.nombre AS comuna, re.nombre AS region, pe.flete_cobrado
-         FROM logistica.pedidos pe
-         JOIN logistica.estados_pedido es ON es.id_estado = pe.id_estado
-         JOIN logistica.comunas co ON co.id_comuna = pe.id_comuna
-         JOIN logistica.regiones re ON re.id_region = co.id_region
-         JOIN ventas.ventas ve ON ve.id_venta = pe.id_venta
-         JOIN ventas.estados_venta ev ON ev.id_estado = ve.id_estado
-         WHERE pe.id_pedido = $1`,
-        [idPedido],
-      );
-      // Un pedido que ya tiene despacho no genera otro: se responde el que existe.
-      if (pedido!.estado !== 'DESPACHADO' && pedido!.estado !== 'ENTREGADO') {
-        await this.despachar(tx, idPedido, pedido!, usuario);
+      throw error;
+    }
+  }
+
+  /** Reintenta los pedidos que quedaron pendientes, con el mismo usuario y la misma clave de idempotencia. */
+  async reintentarPendientes(): Promise<void> {
+    const pendientes = await this.db.consultar<{ id_pedido: number; id_usuario: number | null }>(
+      `SELECT id_pedido, id_usuario FROM logistica.despachos_pendientes
+       WHERE proximo_intento <= now() AND id_usuario IS NOT NULL
+       FOR UPDATE SKIP LOCKED`,
+    );
+    for (const { id_pedido: idPedido, id_usuario: idUsuario } of pendientes) {
+      try {
+        await this.generar(idPedido, { id: idUsuario! } as Usuario);
+      } catch (error) {
+        this.log.warn(`No se pudo reintentar el pedido ${idPedido}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      return (await pedidosConLineas(tx, 'WHERE pe.id_pedido = $1', [idPedido]))[0]!;
-    });
+    }
+  }
+
+  private async registrarPendiente(idPedido: number, usuario: Usuario, error: string): Promise<void> {
+    await this.db.consultar(
+      `INSERT INTO logistica.despachos_pendientes (id_pedido, intentos, proximo_intento, ultimo_error, id_usuario)
+       VALUES ($1, 1, now(), $2, $3)
+       ON CONFLICT (id_pedido) DO UPDATE
+         SET intentos = logistica.despachos_pendientes.intentos + 1, proximo_intento = now(),
+             ultimo_error = EXCLUDED.ultimo_error, id_usuario = EXCLUDED.id_usuario`,
+      [idPedido, error.slice(0, 500), usuario.id],
+    );
   }
 
   private async despachar(tx: Ejecutor, idPedido: number, pedido: PedidoPorDespachar, usuario: Usuario): Promise<void> {
@@ -76,6 +125,7 @@ export class DespachosService {
     // La orden se emite al final, cuando ya se sabe que el pedido se puede despachar.
     const orden: OrdenDeDespacho = {
       referencia: idPedido,
+      idempotencia: `RS-${idPedido}`,
       destinatario: pedido.destinatario,
       direccion: pedido.direccion,
       comuna: pedido.comuna,

@@ -35,6 +35,7 @@ export class DestinosController {
   @Post('fletes/cotizar')
   @HttpCode(200)
   cotizar(@Body() cuerpo: unknown): Promise<CotizacionFlete> {
-    return this.fletes.cotizar(this.db, cuerpoComo<CotizacionFleteRequest>(cuerpo).idComuna);
+    const datos = cuerpoComo<CotizacionFleteRequest>(cuerpo);
+    return this.fletes.cotizar(this.db, datos.idComuna, datos.lineas);
   }
 }

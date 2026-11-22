@@ -6,6 +6,7 @@ import type {
   CompraPendiente,
   Comuna,
   CotizacionFlete,
+  LineaCotizacion,
   PedidoCliente,
   PerfilUsuario,
   Region,
@@ -29,8 +30,11 @@ export class ShopApi {
     return firstValueFrom(this.http.get<Comuna[]>(`${API_URL}/logistica/comunas`, { params: { region: regionId } }));
   }
 
-  quote(comunaId: number): Promise<CotizacionFlete> {
-    return firstValueFrom(this.http.post<CotizacionFlete>(`${API_URL}/logistica/fletes/cotizar`, { idComuna: comunaId }));
+  /** Cótiza el flete a la comuna; las líneas del carrito se envían para que el peso y el volumen sean los del contenido. */
+  quote(comunaId: number, lineas?: LineaCotizacion[]): Promise<CotizacionFlete> {
+    return firstValueFrom(
+      this.http.post<CotizacionFlete>(`${API_URL}/logistica/fletes/cotizar`, { idComuna: comunaId, ...(lineas ? { lineas } : {}) }),
+    );
   }
 
   checkout(request: CheckoutRequest): Promise<CheckoutResponse> {

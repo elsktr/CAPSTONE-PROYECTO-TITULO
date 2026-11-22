@@ -54,6 +54,15 @@ services:
       WEBPAY_CODIGO_COMERCIO: ${WEBPAY_CODIGO_COMERCIO:-}
       WEBPAY_LLAVE_SECRETA: ${WEBPAY_LLAVE_SECRETA:-}
       WEBPAY_URL_RETORNO: ${WEBPAY_URL_RETORNO:-}
+      # Envíos: simulados por defecto. La API REST real se activa con ambiente,
+      # dirección y credenciales de Starken; nunca con valores de ejemplo.
+      STARKEN_AMBIENTE: ${STARKEN_AMBIENTE:-simulada}
+      STARKEN_API_URL: ${STARKEN_API_URL:-}
+      STARKEN_USUARIO: ${STARKEN_USUARIO:-}
+      STARKEN_CLAVE: ${STARKEN_CLAVE:-}
+      STARKEN_SYNC_INTERVAL_MS: ${STARKEN_SYNC_INTERVAL_MS:-60000}
+      STARKEN_TRAMO_PESO: ${STARKEN_TRAMO_PESO:-1000}
+      STARKEN_TRAMO_VOLUMEN: ${STARKEN_TRAMO_VOLUMEN:-5000}
     volumes:
       - api-claves:/claves
     ports:

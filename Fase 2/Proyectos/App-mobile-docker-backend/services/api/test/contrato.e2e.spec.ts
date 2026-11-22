@@ -7,6 +7,7 @@ import type {
   Pedido,
   ProductoNuevoRequest,
   ResultadoMovimientos,
+  SeguimientoEnvio,
   SesionResponse,
   Ubicacion,
   VarianteStock,
@@ -705,6 +706,17 @@ describe('pedidos', () => {
     const { cuerpo } = await obtener<Pedido[]>('/logistica/pedidos?estado=ENTREGADO');
     expect(cuerpo.map((p) => p.idPedido)).toEqual(expect.arrayContaining([1006, 1007]));
     expect(cuerpo.every((p) => p.estado === 'ENTREGADO')).toBe(true);
+  });
+
+  it('el personal consulta el seguimiento de cualquier envío sin datos de contacto', async () => {
+    const gerente = (await iniciarSesion('gerente@rockstar.cl', 'gerente123')).accessToken;
+    for (const token of [bodega, vendedor, gerente]) {
+      const { status, cuerpo } = await obtener<SeguimientoEnvio>('/logistica/envios/STK-900104', token);
+      expect(status).toBe(200);
+      expect(cuerpo).toMatchObject({ codigo: 'STK-900104', estado: expect.any(String), actualizadoEn: expect.any(String) });
+      expect(cuerpo).not.toHaveProperty('direccion');
+      expect(cuerpo).not.toHaveProperty('telefono');
+    }
   });
 });
 

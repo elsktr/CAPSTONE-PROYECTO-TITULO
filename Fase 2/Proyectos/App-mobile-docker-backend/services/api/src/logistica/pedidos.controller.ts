@@ -1,16 +1,18 @@
 import { Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import type { Pedido, PedidoCliente, Usuario } from '@rockstar/contracts';
+import type { Pedido, PedidoCliente, SeguimientoEnvio, Usuario } from '@rockstar/contracts';
 
 import { Roles, UsuarioActual } from '../auth/decoradores.js';
 import { BaseDeDatos } from '../db/base-de-datos.js';
 import { pedidosConLineas, pedidosDeCliente } from './consultas.js';
 import { DespachosService } from './despachos.service.js';
+import { SeguimientosService } from './seguimientos.service.js';
 
 @Controller('logistica')
 export class PedidosController {
   constructor(
     private readonly db: BaseDeDatos,
     private readonly despachos: DespachosService,
+    private readonly seguimientos: SeguimientosService,
   ) {}
 
   /** Pedidos del e-commerce tal como los ve el personal, con sus líneas. `estado` limita la lista a uno. */
@@ -27,6 +29,13 @@ export class PedidosController {
   @Roles('CLIENTE')
   mios(@UsuarioActual() usuario: Usuario): Promise<PedidoCliente[]> {
     return pedidosDeCliente(this.db, usuario.id);
+  }
+
+  /** Estado y eventos de un envío. El servicio comprueba que pertenezca a quien consulta. */
+  @Get('envios/:seguimiento')
+  @Roles('VENDEDOR', 'BODEGA', 'GERENTE', 'CLIENTE')
+  seguimiento(@Param('seguimiento') codigo: string, @UsuarioActual() usuario: Usuario): Promise<SeguimientoEnvio> {
+    return this.seguimientos.consultar(codigo, usuario);
   }
 
   /**

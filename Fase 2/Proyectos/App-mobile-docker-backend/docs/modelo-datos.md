@@ -105,7 +105,7 @@ Cada uno es un valor histórico que no debe cambiar cuando cambia su origen, o u
 
 ## Pendiente
 
-- Las tasas de comisión nacen en cero y `tarifas_respaldo` nace vacía: son valores del negocio que define el Gerente.
+- Las tasas de comisión nacen en cero. `tarifas_respaldo` arranca con valores por zona y tramo que el Gerente puede ajustar.
 - `comunas.codigo_starken` está vacío hasta contar con el catálogo de Starken.
 - No hay migraciones de reversa. Para volver atrás se restaura un respaldo.
 

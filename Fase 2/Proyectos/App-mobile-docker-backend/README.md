@@ -76,7 +76,23 @@ Escribe directo en PostgreSQL (`DATABASE_URL`, por defecto la base de `docker co
 
 Un producto creado desde la bodega no aparece en la tienda hasta que el Gerente le pone precio: en la tienda, "Acceso administrador", pestaña Bodega, botón Editar.
 
-La tienda cobra con **Webpay Plus** de Transbank (`services/api/src/pagos/pasarela.ts`). Con `docker compose` usa el ambiente de integración de Transbank: Webpay real, pero solo con tarjetas de prueba y sin dinero (VISA `4051 8856 0044 6623`, CVV `123`, RUT `11.111.111-1`, clave `123`). `WEBPAY_AMBIENTE` lo cambia a `simulada` (no sale a Transbank) o a `produccion` (con el código de comercio y la llave propios; ver `.env.example`). Los despachos siguen simulados: el código de seguimiento no existe en Starken, y el adaptador (`services/api/src/logistica/transportista.ts`) se reemplaza al tener credenciales.
+La tienda cobra con **Webpay Plus** de Transbank (`services/api/src/pagos/pasarela.ts`). Con `docker compose` usa el ambiente de integración de Transbank: Webpay real, pero solo con tarjetas de prueba y sin dinero (VISA `4051 8856 0044 6623`, CVV `123`, RUT `11.111.111-1`, clave `123`). `WEBPAY_AMBIENTE` lo cambia a `simulada` (no sale a Transbank) o a `produccion` (con el código de comercio y la llave propios; ver `.env.example`).
+
+### Envíos con Starken
+
+Los fletes, los despachos y el seguimiento pasan por un solo adaptador (`services/api/src/logistica/transportista.ts`). Por defecto `STARKEN_AMBIENTE=simulada`: no se llama a Starken, las cotizaciones dependen del destino y del peso y volumen del carrito, y los códigos de seguimiento (p. ej. `STK-901001`) son deterministas. Para usar la API REST, configurar `STARKEN_AMBIENTE=integracion` o `produccion` junto con `STARKEN_API_URL`, `STARKEN_USUARIO` y `STARKEN_CLAVE`; con la dirección o las credenciales incompletas la API no arranca. El resto del sistema no cambia: tienda, POS y bodega siguen usando los mismos contratos. `STARKEN_SYNC_INTERVAL_MS` controla cada cuánto se actualiza el seguimiento de los pedidos despachados.
+
+El estado de un envío se consulta por su código, con sesión de Cliente (solo el suyo) o de Vendedor, Bodega y Gerente (cualquiera):
+
+```
+TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/usuarios/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"bodega@rockstar.cl","password":"bodega123"}' | jq -r .accessToken)
+curl -s http://localhost:3000/api/v1/logistica/envios/STK-900104 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Responde `{ "codigo", "estado", "eventos": [{ "estado", "descripcion", "fecha" }], "actualizadoEn" }`. Un código que no existe responde 404 `NO_ENCONTRADO`; si Starken falla y ya hay estado guardado, se devuelve ese último estado.
 
 Otros comandos:
 
@@ -233,5 +249,11 @@ npm run test:e2e
 | `MIGRACIONES_DIR` | Carpeta de migraciones | `db/migrations` |
 | `ANTHROPIC_API_KEY` | Clave del servicio de IA del chat del asesor. Sin ella, el chat no se muestra | vacío |
 | `DEEZER_API_URL` | API de donde el asesor toma la popularidad de las bandas | `https://api.deezer.com` |
+| `WEBPAY_AMBIENTE` | Pasarela: `simulada`, `integracion` o `produccion` | `integracion` |
+| `WEBPAY_CODIGO_COMERCIO`, `WEBPAY_LLAVE_SECRETA` | Credenciales de Webpay en producción | vacío |
+| `STARKEN_AMBIENTE` | Envíos: `simulada`, `integracion` o `produccion` | `simulada` |
+| `STARKEN_API_URL`, `STARKEN_USUARIO`, `STARKEN_CLAVE` | API REST y credenciales de Starken; obligatorios fuera de `simulada` | vacío |
+| `STARKEN_SYNC_INTERVAL_MS` | Intervalo de actualización del seguimiento | `60000` |
+| `STARKEN_TRAMO_PESO`, `STARKEN_TRAMO_VOLUMEN` | Tamaño de los tramos de peso (g) y volumen (cm³) al cotizar | `1000`, `5000` |
 
 Las cuentas de demostración tienen contraseñas públicas. Fuera de desarrollo, usa `SEMBRAR_DEMO=false`.

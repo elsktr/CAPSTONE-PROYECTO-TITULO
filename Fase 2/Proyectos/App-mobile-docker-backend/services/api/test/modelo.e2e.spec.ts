@@ -52,6 +52,7 @@ const TABLAS_DEL_DISENO: Record<string, string[]> = {
     'historial_pedido',
     'pedidos',
     'regiones',
+    'seguimiento_eventos',
     'solicitudes_despacho',
     'tarifas_cache',
     'tarifas_respaldo',
@@ -139,6 +140,25 @@ describe('modelo de datos', () => {
       }
     });
 
+    it('indexa los eventos de seguimiento por código y fecha', async () => {
+      const indices = await filas<{ indice: string; columnas: string }>(
+        `SELECT i.relname AS indice, string_agg(a.attname, ',' ORDER BY k.ord) AS columnas
+         FROM pg_class i
+         JOIN pg_index x ON x.indexrelid = i.oid
+         JOIN pg_class t ON t.oid = x.indrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+         JOIN generate_subscripts(x.indkey, 1) AS k(ord) ON true
+         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = x.indkey[k.ord]
+         WHERE n.nspname = 'logistica' AND t.relname = 'seguimiento_eventos'
+         GROUP BY i.relname ORDER BY i.relname`,
+      );
+      expect(indices).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ indice: 'seguimiento_eventos_por_codigo_fecha', columnas: 'codigo,fecha_evento' }),
+        ]),
+      );
+    });
+
     it('toda tabla tiene clave primaria', async () => {
       const sinClave = await filas(
         `SELECT t.table_schema || '.' || t.table_name AS tabla
@@ -167,6 +187,7 @@ describe('modelo de datos', () => {
         'inventario.ofertas -> usuarios.usuarios',
         'inventario.operaciones -> usuarios.usuarios',
         'inventario.reservas -> ventas.ventas',
+        'logistica.despachos_pendientes -> usuarios.usuarios',
         'logistica.historial_pedido -> usuarios.usuarios',
         'logistica.pedidos -> ventas.ventas',
         'logistica.solicitudes_despacho -> ventas.ventas',

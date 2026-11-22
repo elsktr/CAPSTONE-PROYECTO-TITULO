@@ -155,14 +155,14 @@ export class CartService {
     write(localStorage, SHIPPING_KEY, this.shipping());
   }
 
-  /** Cotiza el despacho a la comuna elegida. Sin comuna, deja el flete sin valor. */
+  /** Cotiza el despacho a la comuna elegida y al contenido del carrito. Sin comuna, deja el flete sin valor. */
   async quote(): Promise<void> {
     const { comunaId } = this.shipping();
     if (comunaId === null) {
       this.shippingCost.set(null);
       return;
     }
-    const { valor } = await this.api.quote(comunaId);
+    const { valor } = await this.api.quote(comunaId, this.items().map((i) => ({ idVariante: i.id, cantidad: i.qty })));
     // La comuna pudo cambiar mientras llegaba la respuesta.
     if (this.shipping().comunaId === comunaId) {
       this.shippingCost.set(valor);
@@ -241,6 +241,8 @@ export class CartService {
   private setItems(items: CartItem[]): void {
     this.items.set(items);
     write(localStorage, CART_KEY, items);
+    // El flete depende de la cantidad: después de cambiar items se cotiza de nuevo.
+    void this.quote();
   }
 
   private setPending(purchase: CheckoutResponse | null): void {
