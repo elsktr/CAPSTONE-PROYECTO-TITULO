@@ -29,6 +29,24 @@ export interface Configuracion {
   deezerUrl: string;
   /** Pasarela con que se pagan las compras de la tienda web. */
   webpay: ConfiguracionWebpay;
+  /** Transportista con que se cotizan y emiten los despachos de la tienda web. */
+  starken: AmbienteStarken;
+  /** Commit que se está ejecutando, si quien despliega lo informa (Render, en `RENDER_GIT_COMMIT`). */
+  version?: string;
+}
+
+/**
+ * `simulado` cotiza tarifas fijas y emite despachos ficticios. `desactivado` apaga los envíos:
+ * las compras no cobran flete y los pedidos quedan pagados sin despacho.
+ */
+export type AmbienteStarken = 'simulado' | 'desactivado';
+
+function leerStarken(env: NodeJS.ProcessEnv): AmbienteStarken {
+  const ambiente = env['STARKEN_AMBIENTE']?.trim().toLowerCase() || 'simulado';
+  if (ambiente !== 'simulado' && ambiente !== 'desactivado') {
+    throw new Error('La variable STARKEN_AMBIENTE debe ser simulado o desactivado.');
+  }
+  return ambiente;
 }
 
 /**
@@ -86,6 +104,11 @@ function entero(valor: string | undefined, porDefecto: number, nombre: string): 
   return numero;
 }
 
+/** Clave PEM de una variable de entorno. Acepta los saltos de línea escritos como `\n`, para pegarla en una sola línea. */
+function pem(valor: string | undefined): string | undefined {
+  return valor?.trim().replace(/\\n/g, '\n') || undefined;
+}
+
 export function leerConfiguracion(env: NodeJS.ProcessEnv = process.env): Configuracion {
   const databaseUrl = env['DATABASE_URL']?.trim();
   if (!databaseUrl) {
@@ -104,12 +127,14 @@ export function leerConfiguracion(env: NodeJS.ProcessEnv = process.env): Configu
     directorioMigraciones:
       env['MIGRACIONES_DIR']?.trim() || fileURLToPath(new URL('../../../../../../db/migrations', import.meta.url)),
     directorioClaves: env['JWT_CLAVES_DIR']?.trim() || 'claves',
-    clavePrivada: env['JWT_CLAVE_PRIVADA']?.trim() || undefined,
-    clavePublica: env['JWT_CLAVE_PUBLICA']?.trim() || undefined,
+    clavePrivada: pem(env['JWT_CLAVE_PRIVADA']),
+    clavePublica: pem(env['JWT_CLAVE_PUBLICA']),
     origenesCors: origenes.length === 0 || origenes.includes('*') ? true : origenes,
     sembrarDemo: VERDADERO.has((env['SEMBRAR_DEMO'] ?? '').trim().toLowerCase()),
     asesorConfigurado: Boolean(env['ANTHROPIC_API_KEY']?.trim() || env['ANTHROPIC_AUTH_TOKEN']?.trim()),
     deezerUrl: (env['DEEZER_API_URL']?.trim() || 'https://api.deezer.com').replace(/\/+$/, ''),
     webpay: leerWebpay(env),
+    starken: leerStarken(env),
+    version: env['RENDER_GIT_COMMIT']?.trim() || undefined,
   };
 }

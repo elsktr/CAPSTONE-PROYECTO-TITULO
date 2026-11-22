@@ -91,3 +91,46 @@ jobs:
             sleep 2
           done
           npx cypress run
+
+  # Publica la web de prueba en Render cuando todas las pruebas pasan en main. Render no
+  # despliega solo (`autoDeployTrigger: off` en render.yaml): lo pide este paso con los
+  # deploy hooks de cada servicio, guardados como secretos del repositorio.
+  desplegar:
+    name: Web de prueba (Render)
+    needs: [api, bodega, tienda, pos]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      HOOK_API: ${{ secrets.RENDER_HOOK_API }}
+      HOOK_TIENDA: ${{ secrets.RENDER_HOOK_TIENDA }}
+      HOOK_BODEGA: ${{ secrets.RENDER_HOOK_BODEGA }}
+      URL_TIENDA: ${{ vars.RENDER_URL_TIENDA }}
+    steps:
+      - name: Pedir el despliegue a Render
+        id: hooks
+        run: |
+          if [ -z "$HOOK_API" ] || [ -z "$HOOK_TIENDA" ] || [ -z "$HOOK_BODEGA" ]; then
+            echo "::warning::Faltan los secretos RENDER_HOOK_API, RENDER_HOOK_TIENDA o RENDER_HOOK_BODEGA: no se despliega."
+            exit 0
+          fi
+          # `ref` despliega exactamente el commit que pasó las pruebas.
+          for hook in "$HOOK_API" "$HOOK_TIENDA" "$HOOK_BODEGA"; do
+            curl --fail --silent --show-error --request POST "${hook}&ref=${GITHUB_SHA}" --output /dev/null
+          done
+          echo "pedido=true" >> "$GITHUB_OUTPUT"
+
+      - name: Esperar que la tienda responda con la versión nueva
+        if: steps.hooks.outputs.pedido == 'true' && env.URL_TIENDA != ''
+        timeout-minutes: 20
+        run: |
+          # La tienda reenvía /api a la API: si responde la versión nueva, ambas quedaron conectadas.
+          while true; do
+            version=$(curl --silent --max-time 100 "$URL_TIENDA/api/v1/salud" | jq -r '.version // empty' 2>/dev/null || true)
+            if [ "$version" = "$GITHUB_SHA" ]; then
+              echo "La web de prueba responde con $GITHUB_SHA: $URL_TIENDA"
+              break
+            fi
+            echo "Aún responde ${version:-sin versión}; reintento en 20 s."
+            sleep 20
+          done
+          curl --fail --silent --show-error --max-time 100 "$URL_TIENDA/" --output /dev/null

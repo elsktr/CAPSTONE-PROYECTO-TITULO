@@ -41,7 +41,9 @@ import { formatCLP, formatDate, orderStatusLabel } from '../data/models';
         <ng-template #noTracking>
           <div class="dato">
             <ion-icon name="cube-outline"></ion-icon>
-            <span>Aún no se despacha: el código de seguimiento aparecerá aquí.</span>
+            <!-- Solo se cobra flete cero con los envíos apagados: ese pedido no se despacha. -->
+            <span *ngIf="o.flete > 0; else sinEnvio">Aún no se despacha: el código de seguimiento aparecerá aquí.</span>
+            <ng-template #sinEnvio><span>Envíos por Starken disponibles próximamente: este pedido no se despacha por ahora.</span></ng-template>
           </div>
         </ng-template>
         <div class="totals">

@@ -33,6 +33,8 @@ export interface DespachoEmitido {
 }
 
 export interface Transportista {
+  /** Si hace envíos. Uno desactivado no cobra flete y no emite despachos. */
+  readonly activo: boolean;
   /** Valor del despacho a ese destino, en pesos. */
   cotizar(destino: DestinoDeFlete): Promise<number>;
   emitirDespacho(orden: OrdenDeDespacho): Promise<DespachoEmitido>;
@@ -51,11 +53,30 @@ const BASE_SEGUIMIENTO = 900_000;
  */
 @Injectable()
 export class StarkenSimulado implements Transportista {
+  readonly activo = true;
+
   async cotizar(destino: DestinoDeFlete): Promise<number> {
     return TARIFA_SIMULADA[destino.zona];
   }
 
   async emitirDespacho(orden: OrdenDeDespacho): Promise<DespachoEmitido> {
     return { seguimiento: `STK-${BASE_SEGUIMIENTO + orden.referencia}`, costo: orden.fleteCotizado };
+  }
+}
+
+/**
+ * Envíos apagados, para publicar la tienda mientras no haya cuenta con Starken: el flete
+ * vale cero y ningún pedido se despacha. `DespachosService` no llega a pedirle una orden.
+ */
+@Injectable()
+export class StarkenDesactivado implements Transportista {
+  readonly activo = false;
+
+  async cotizar(): Promise<number> {
+    return 0;
+  }
+
+  async emitirDespacho(): Promise<DespachoEmitido> {
+    throw new Error('Los envíos están desactivados.');
   }
 }

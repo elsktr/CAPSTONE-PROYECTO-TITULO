@@ -55,6 +55,8 @@ export class CartService {
   readonly shipping = signal<ShippingData>({ ...EMPTY_SHIPPING, ...read(localStorage, SHIPPING_KEY, {}) });
   /** Valor del despacho a la comuna elegida; `null` mientras no se ha cotizado. */
   readonly shippingCost = signal<number | null>(null);
+  /** `false` cuando el backend tiene los envíos apagados: no se cobra flete y el pedido no se despacha. */
+  readonly shippingAvailable = signal(true);
   /** Compra creada en el backend que espera su pago. */
   readonly pending = signal<CheckoutResponse | null>(read(sessionStorage, PENDING_KEY, null));
 
@@ -162,10 +164,11 @@ export class CartService {
       this.shippingCost.set(null);
       return;
     }
-    const { valor } = await this.api.quote(comunaId);
+    const { valor, disponible } = await this.api.quote(comunaId);
     // La comuna pudo cambiar mientras llegaba la respuesta.
     if (this.shipping().comunaId === comunaId) {
       this.shippingCost.set(valor);
+      this.shippingAvailable.set(disponible);
     }
   }
 

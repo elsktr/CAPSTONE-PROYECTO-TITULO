@@ -54,6 +54,9 @@ services:
       WEBPAY_CODIGO_COMERCIO: ${WEBPAY_CODIGO_COMERCIO:-}
       WEBPAY_LLAVE_SECRETA: ${WEBPAY_LLAVE_SECRETA:-}
       WEBPAY_URL_RETORNO: ${WEBPAY_URL_RETORNO:-}
+      # Despachos de la tienda: `simulado` cobra tarifas fijas y emite seguimientos ficticios;
+      # `desactivado` apaga los envíos (flete $0, los pedidos no se despachan).
+      STARKEN_AMBIENTE: ${STARKEN_AMBIENTE:-simulado}
     volumes:
       - api-claves:/claves
     ports:

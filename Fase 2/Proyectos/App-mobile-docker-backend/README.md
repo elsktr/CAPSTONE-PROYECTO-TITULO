@@ -76,7 +76,7 @@ Escribe directo en PostgreSQL (`DATABASE_URL`, por defecto la base de `docker co
 
 Un producto creado desde la bodega no aparece en la tienda hasta que el Gerente le pone precio: en la tienda, "Acceso administrador", pestaña Bodega, botón Editar.
 
-La tienda cobra con **Webpay Plus** de Transbank (`services/api/src/pagos/pasarela.ts`). Con `docker compose` usa el ambiente de integración de Transbank: Webpay real, pero solo con tarjetas de prueba y sin dinero (VISA `4051 8856 0044 6623`, CVV `123`, RUT `11.111.111-1`, clave `123`). `WEBPAY_AMBIENTE` lo cambia a `simulada` (no sale a Transbank) o a `produccion` (con el código de comercio y la llave propios; ver `.env.example`). Los despachos siguen simulados: el código de seguimiento no existe en Starken, y el adaptador (`services/api/src/logistica/transportista.ts`) se reemplaza al tener credenciales.
+La tienda cobra con **Webpay Plus** de Transbank (`services/api/src/pagos/pasarela.ts`). Con `docker compose` usa el ambiente de integración de Transbank: Webpay real, pero solo con tarjetas de prueba y sin dinero (VISA `4051 8856 0044 6623`, CVV `123`, RUT `11.111.111-1`, clave `123`). `WEBPAY_AMBIENTE` lo cambia a `simulada` (no sale a Transbank) o a `produccion` (con el código de comercio y la llave propios; ver `.env.example`). Los despachos siguen simulados: el código de seguimiento no existe en Starken, y el adaptador (`services/api/src/logistica/transportista.ts`) se reemplaza al tener credenciales. Con `STARKEN_AMBIENTE=desactivado` los envíos se apagan: la compra no cobra flete, la tienda avisa que los envíos por Starken llegan próximamente y los pedidos quedan pagados sin despacho.
 
 Otros comandos:
 
@@ -200,6 +200,29 @@ Requisitos para compilar, una sola vez por equipo:
 
 El APK es de depuración: sirve para instalarlo directamente, no para publicarlo en una tienda. La app habla con el backend por HTTP sin cifrar, lo que es aceptable dentro de la red de la tienda y no fuera de ella.
 
+## Web de prueba en Render
+
+La tienda, la app de bodega y la API se publican en [Render](https://render.com) con el plan gratis, según `render.yaml` (en la raíz del repositorio). Cualquiera puede registrarse y comprar: el pago es Webpay en el ambiente de prueba de Transbank, con la tarjeta de prueba y sin dinero, y los envíos están apagados (`STARKEN_AMBIENTE=desactivado`).
+
+El pipeline de GitHub Actions (`.github/workflows/ci.yml`) corre todas las pruebas en cada push a `main`. Si pasan, le pide a Render que despliegue ese commit y espera hasta que la tienda responda con la versión nueva. Render no despliega por su cuenta.
+
+**Crearla, una sola vez:**
+
+1. En Render, **New → Blueprint**, conecta este repositorio de GitHub y acepta `render.yaml`. Crea la base y los tres servicios.
+2. Render pide los valores que no están en el archivo:
+   - `API_URL` de `rockstar-tienda` y de `rockstar-bodega`: `https://rockstar-api.onrender.com`, sin `/` al final.
+   - `JWT_CLAVE_PRIVADA` y `JWT_CLAVE_PUBLICA` de `rockstar-api`: las dos líneas que imprime `npm run claves` en `services/api`, cada una sin el `NOMBRE=` del comienzo.
+3. Si Render le dio a la API otra dirección (cuando el nombre ya está tomado, agrega un sufijo), corrige `API_URL` en los dos servicios, en **Environment**.
+4. En cada servicio, **Settings → Deploy Hook**: copia la dirección y guárdala en GitHub (**Settings → Secrets and variables → Actions**) como secreto `RENDER_HOOK_API`, `RENDER_HOOK_TIENDA` y `RENDER_HOOK_BODEGA`.
+5. En la misma página, pestaña **Variables**, crea `RENDER_URL_TIENDA` con la dirección de la tienda (por ejemplo `https://rockstar-tienda.onrender.com`). Con ella, el pipeline espera la versión nueva; sin ella, solo pide el despliegue.
+
+Sin los secretos, el pipeline corre las pruebas y avisa que no despliega.
+
+**Límites del plan gratis:**
+- Cada servicio se duerme tras 15 minutos sin visitas. La primera visita después tarda cerca de un minuto, y la API despierta aparte.
+- La base gratis vence a los 30 días. Para seguir, se crea otra y se vuelve a sembrar.
+- Los datos de demostración tienen contraseñas públicas: cualquiera puede entrar como Bodega o Gerente.
+
 ## Pruebas
 
 ```
@@ -228,7 +251,9 @@ npm run test:e2e
 | `SEMBRAR_DEMO` | Carga los datos de demostración si la base está vacía | `false` |
 | `CORS_ORIGENES` | Orígenes permitidos, separados por coma. Vacío acepta cualquiera | vacío |
 | `JWT_CLAVES_DIR` | Carpeta del par de claves que firma los tokens. Se genera si no existe | `claves` |
-| `JWT_CLAVE_PRIVADA`, `JWT_CLAVE_PUBLICA` | Claves en formato PEM, en lugar de la carpeta | |
+| `JWT_CLAVE_PRIVADA`, `JWT_CLAVE_PUBLICA` | Claves en formato PEM, en lugar de la carpeta. Aceptan los saltos de línea escritos como `\n`; `npm run claves` las genera así | |
+| `WEBPAY_AMBIENTE` | Pasarela de pago: `simulada`, `integracion` o `produccion` | `simulada` |
+| `STARKEN_AMBIENTE` | Despachos: `simulado` o `desactivado` (flete $0, sin despachos) | `simulado` |
 | `DB_POOL_MAX` | Conexiones simultáneas a la base | `10` |
 | `MIGRACIONES_DIR` | Carpeta de migraciones | `db/migrations` |
 | `ANTHROPIC_API_KEY` | Clave del servicio de IA del chat del asesor. Sin ella, el chat no se muestra | vacío |

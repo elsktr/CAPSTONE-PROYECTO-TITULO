@@ -71,6 +71,13 @@ export class DespachosService {
     if (!pedido.venta_pagada) {
       throw new ErrorDeNegocio(409, 'PEDIDO_NO_PAGADO', 'La compra de este pedido no está pagada.');
     }
+    if (!this.transportista.activo) {
+      throw new ErrorDeNegocio(
+        409,
+        'DESPACHO_DESACTIVADO',
+        'Los envíos por Starken están desactivados por ahora: el pedido queda pagado y no se despacha.',
+      );
+    }
     await this.descontarStock(tx, idPedido, pedido.id_venta, usuario);
 
     // La orden se emite al final, cuando ya se sabe que el pedido se puede despachar.

@@ -45,10 +45,11 @@ async function esperarSalud(url, proceso) {
 }
 
 /**
- * @param {{ puertoApi?: number, silencioso?: boolean }} [opciones]
+ * @param {{ puertoApi?: number, silencioso?: boolean, entorno?: Record<string, string> }} [opciones]
+ *   `entorno` agrega variables de entorno a la API, por ejemplo para apagar los envíos.
  * @returns {Promise<{ apiUrl: string, db: PGlite, detener: () => Promise<void> }>}
  */
-export async function iniciarEntornoLocal({ puertoApi, silencioso = false } = {}) {
+export async function iniciarEntornoLocal({ puertoApi, silencioso = false, entorno = {} } = {}) {
   const db = await PGlite.create();
   const puertoDb = await puertoLibre();
   // PGlite tiene una sola sesión: una conexión a la vez, para que las transacciones no se mezclen.
@@ -66,6 +67,7 @@ export async function iniciarEntornoLocal({ puertoApi, silencioso = false } = {}
       DB_POOL_MAX: '1',
       JWT_CLAVES_DIR: claves,
       SEMBRAR_DEMO: 'true',
+      ...entorno,
     },
     stdio: silencioso ? ['ignore', 'ignore', 'inherit'] : 'inherit',
   });

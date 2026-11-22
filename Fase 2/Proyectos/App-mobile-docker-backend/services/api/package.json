@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/services/api/src/main.js",
     "local": "npm run build && node test/entorno-local.mjs",
+    "claves": "node scripts/generar-claves.mjs",
     "semilla:bandas": "node scripts/cargar-bandas.mjs",
     "semilla:prendas": "node scripts/cargar-prendas.mjs",
     "semilla:historial": "node scripts/sembrar-historial.mjs",

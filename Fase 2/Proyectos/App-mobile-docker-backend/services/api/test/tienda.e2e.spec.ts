@@ -366,7 +366,7 @@ describe('destinos y flete', () => {
   });
 
   it('cotiza el flete según la zona de la comuna', async () => {
-    expect((await enviar<CotizacionFlete>('/logistica/fletes/cotizar', { idComuna: providencia })).cuerpo).toEqual({ idComuna: providencia, valor: 3990 });
+    expect((await enviar<CotizacionFlete>('/logistica/fletes/cotizar', { idComuna: providencia })).cuerpo).toEqual({ idComuna: providencia, valor: 3990, disponible: true });
     expect((await enviar<CotizacionFlete>('/logistica/fletes/cotizar', { idComuna: temuco })).cuerpo.valor).toBe(7990);
     expect(await enviar<ErrorApi>('/logistica/fletes/cotizar', { idComuna: 999999 })).toEqual({
       status: 400,

@@ -121,6 +121,9 @@ import { ToastService } from '../services/toast.service';
               <span>Despacho</span>
               <span>{{ cart.shippingCost() === null ? 'Elige una comuna' : formatCLP(cart.shippingCost()!) }}</span>
             </div>
+            <p class="shipping-note" *ngIf="!cart.shippingAvailable()">
+              Envíos por Starken disponibles próximamente. Esta compra no cobra despacho.
+            </p>
             <div class="total-row grand">
               <span>Total</span>
               <span class="text-accent">{{ formatCLP(cart.total()) }}</span>
@@ -192,6 +195,7 @@ import { ToastService } from '../services/toast.service';
     }
     .totals { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
     .total-row { display: flex; justify-content: space-between; font-size: 14px; color: var(--text-muted); }
+    .shipping-note { margin: 0; font-size: 12px; color: var(--text-faint); }
     .total-row.grand { font-size: 18px; font-weight: 900; color: var(--text); padding-top: 8px; border-top: 1px solid #18181b; }
     .error-msg {
       margin: 16px 0 0;

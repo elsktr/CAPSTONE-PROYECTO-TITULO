@@ -25,7 +25,7 @@ export class FletesService {
       throw datosInvalidos('La comuna no existe.');
     }
     try {
-      return { idComuna: idComuna as number, valor: await this.transportista.cotizar(destino) };
+      return { idComuna: idComuna as number, valor: await this.transportista.cotizar(destino), disponible: this.transportista.activo };
     } catch (error) {
       this.log.warn(`No se pudo cotizar el flete a ${destino.comuna}: ${error instanceof Error ? error.message : String(error)}`);
       throw new ErrorDeNegocio(503, 'TRANSPORTISTA_NO_DISPONIBLE', 'No se pudo calcular el despacho. Reintenta en unos minutos.');

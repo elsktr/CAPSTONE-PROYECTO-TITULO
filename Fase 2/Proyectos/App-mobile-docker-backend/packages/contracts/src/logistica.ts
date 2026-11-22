@@ -53,6 +53,8 @@ export interface CotizacionFlete {
   idComuna: number;
   /** Costo del despacho a esa comuna, en pesos. */
   valor: number;
+  /** `false` cuando los envíos están desactivados: el flete vale cero y el pedido no se despacha. */
+  disponible: boolean;
 }
 
 export interface LineaPedidoCliente extends LineaPedido {

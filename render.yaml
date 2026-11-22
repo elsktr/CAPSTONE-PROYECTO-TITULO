@@ -1,0 +1,94 @@
+# Web de prueba de Rockstar en Render (https://render.com/docs/blueprint-spec).
+#
+# Las mismas piezas que `docker compose`, construidas con sus Dockerfiles:
+#
+#   rockstar-db      PostgreSQL
+#   rockstar-api     backend en NestJS
+#   rockstar-tienda  e-commerce: compras con Webpay de prueba (tarjetas de prueba, sin dinero)
+#   rockstar-bodega  app de bodega en el navegador
+#
+# Render no despliega solo al recibir un push: lo pide el pipeline de GitHub Actions
+# (`.github/workflows/ci.yml`) cuando pasan todas las pruebas.
+# Cómo crearlo y conectarlo: "Web de prueba en Render" en
+# `Fase 2/Proyectos/App-mobile-docker-backend/README.md`.
+#
+# Todo va en el plan gratis: los servicios se duermen tras 15 minutos sin visitas (la primera
+# visita después tarda alrededor de un minuto) y la base gratis vence a los 30 días.
+
+databases:
+  - name: rockstar-db
+    plan: free
+    region: virginia
+    databaseName: rockstar
+    user: rockstar
+    postgresMajorVersion: "17"
+    # Solo la alcanzan los servicios de Render, por la red privada.
+    ipAllowList: []
+
+services:
+  - type: web
+    name: rockstar-api
+    runtime: docker
+    plan: free
+    region: virginia
+    dockerContext: "./Fase 2/Proyectos/App-mobile-docker-backend"
+    dockerfilePath: "./Fase 2/Proyectos/App-mobile-docker-backend/services/api/Dockerfile"
+    healthCheckPath: /api/v1/salud
+    autoDeployTrigger: "off"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rockstar-db
+          property: connectionString
+      - key: PORT
+        value: "3000"
+      - key: PUERTO
+        value: "3000"
+      # Cuentas, productos y pedidos de demostración, para que se pueda probar de inmediato.
+      # Sus contraseñas son públicas (README): cualquiera puede entrar como Bodega o Gerente.
+      - key: SEMBRAR_DEMO
+        value: "true"
+      # Webpay real en el ambiente de prueba de Transbank: tarjetas de prueba, sin dinero.
+      - key: WEBPAY_AMBIENTE
+        value: integracion
+      # Envíos apagados mientras no haya cuenta con Starken: flete $0 y sin despachos.
+      - key: STARKEN_AMBIENTE
+        value: desactivado
+      # Par de claves de las sesiones (`npm run claves` en services/api). Sin ellas, cada vez
+      # que el servicio se duerme se generan claves nuevas y se cierran todas las sesiones.
+      - key: JWT_CLAVE_PRIVADA
+        sync: false
+      - key: JWT_CLAVE_PUBLICA
+        sync: false
+
+  - type: web
+    name: rockstar-tienda
+    runtime: docker
+    plan: free
+    region: virginia
+    dockerContext: "./Fase 2/Proyectos/App-mobile-docker-backend"
+    dockerfilePath: "./Fase 2/Proyectos/App-mobile-docker-backend/apps/e-commerce/Dockerfile"
+    healthCheckPath: /
+    autoDeployTrigger: "off"
+    envVars:
+      - key: PORT
+        value: "80"
+      # Dirección pública de rockstar-api, sin `/` al final (https://rockstar-api.onrender.com).
+      # En el plan gratis la API no recibe tráfico por la red privada.
+      - key: API_URL
+        sync: false
+
+  - type: web
+    name: rockstar-bodega
+    runtime: docker
+    plan: free
+    region: virginia
+    dockerContext: "./Fase 2/Proyectos/App-mobile-docker-backend"
+    dockerfilePath: "./Fase 2/Proyectos/App-mobile-docker-backend/apps/bodega-mobile/Dockerfile"
+    healthCheckPath: /
+    autoDeployTrigger: "off"
+    envVars:
+      - key: PORT
+        value: "80"
+      - key: API_URL
+        sync: false
