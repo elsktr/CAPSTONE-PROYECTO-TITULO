@@ -183,12 +183,17 @@ describe('cargador del catálogo de bandas', () => {
   it('carga las fotos, los productos con su stock y sus precios', async () => {
     const { stdout } = await cargar();
 
-    expect(stdout).toContain('Fotos de bandas guardadas: 17 de 17');
-    expect(stdout).toContain('Variantes creadas: 38 de 38');
-    expect(stdout).toContain('Productos que recibieron precio: 19 de 19');
+    expect(stdout).toContain('Fotos de bandas guardadas: 19 de 19');
+    expect(stdout).toContain('Conciertos registrados: 2');
+    expect(stdout).toContain('Variantes creadas: 42 de 42');
+    expect(stdout).toContain('Productos que recibieron precio: 21 de 21');
 
     const lista = await bandas();
-    expect(lista).toHaveLength(17);
+    expect(lista).toHaveLength(19);
+    // Slipknot y Marilyn Manson traen su concierto en el catálogo; las demás quedan como estaban.
+    const estadio = { fecha: '2027-09-12', lugar: 'Estadio Nacional, Santiago' };
+    expect(lista.find((b) => b.nombre === 'Slipknot')!.concierto).toEqual(estadio);
+    expect(lista.find((b) => b.nombre === 'Marilyn Manson')!.concierto).toEqual(estadio);
     expect(lista.every((b) => b.imagenUrl !== null && b.credito?.includes('Wikimedia Commons'))).toBe(true);
     const queen = lista.find((b) => b.nombre === 'Queen')!;
     const foto = await pedirFoto(queen.imagenUrl!);
@@ -214,10 +219,13 @@ describe('cargador del catálogo de bandas', () => {
     const antes = (await llamar<VarianteGestion[]>('GET', '/inventario/productos', undefined, bodega)).cuerpo;
     const kiss = antes.find((v) => v.producto === 'Polera Kiss Destroyer')!;
     await llamar('PATCH', `/inventario/productos/${kiss.idProducto}`, { precio: 9990 }, gerente);
+    const cambiado = { fecha: '2027-09-13', lugar: 'Movistar Arena, Santiago' };
+    await llamar('PUT', '/inventario/bandas/concierto', { banda: 'Slipknot', ...cambiado }, gerente);
 
     const { stdout } = await cargar();
 
     expect(stdout).toContain('Todo estaba cargado: no hubo cambios.');
+    expect((await bandas()).find((b) => b.nombre === 'Slipknot')!.concierto).toEqual(cambiado);
     const despues = (await llamar<VarianteGestion[]>('GET', '/inventario/productos', undefined, bodega)).cuerpo;
     expect(despues).toHaveLength(antes.length);
     expect(despues.find((v) => v.producto === 'Polera Kiss Destroyer')!.precio).toBe(9990);
