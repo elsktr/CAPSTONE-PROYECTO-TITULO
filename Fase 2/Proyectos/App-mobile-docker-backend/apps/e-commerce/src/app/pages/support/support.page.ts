@@ -165,6 +165,7 @@ export class SupportPage implements AfterViewChecked {
     const respuesta = responder(value, this.contexto, {
       nombre: esCliente ? (this.auth.user()?.name ?? null) : null,
       esCliente,
+      esPersonal: this.auth.isAdmin(),
       productos: this.products.products(),
       pedidos: this.pedidos,
     });

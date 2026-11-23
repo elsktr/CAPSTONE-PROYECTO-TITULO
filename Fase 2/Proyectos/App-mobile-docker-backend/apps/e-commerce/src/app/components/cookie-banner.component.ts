@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { Component, input, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 const COOKIES_KEY = 'rockstar.tienda.cookies';
@@ -26,7 +26,7 @@ export const cookieBannerVisible = signal(storedChoice() === null);
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div *ngIf="visible()" class="cookie-banner" role="dialog" aria-live="polite" aria-labelledby="cookie-title">
+    <div *ngIf="visible()" class="cookie-banner" [class.arriba]="arriba()" role="dialog" aria-live="polite" aria-labelledby="cookie-title">
       <div class="cookie-text">
         <p id="cookie-title" class="cookie-title">🍪 Usamos cookies</p>
         <p class="cookie-body">
@@ -61,6 +61,16 @@ export const cookieBannerVisible = signal(storedChoice() === null);
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
       animation: cookie-in 0.25s ease-out;
     }
+    /* Bajo el encabezado y la barra de categorías, en las pantallas que usan la parte de abajo. */
+    .cookie-banner.arriba {
+      top: calc(112px + env(safe-area-inset-top));
+      bottom: auto;
+      animation-name: cookie-in-arriba;
+    }
+    @keyframes cookie-in-arriba {
+      from { opacity: 0; transform: translateY(-12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
     .cookie-text { flex: 1 1 280px; }
     .cookie-title { margin: 0 0 4px; font-size: 14px; font-weight: 900; color: var(--text); }
     .cookie-body { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text-muted); }
@@ -89,6 +99,8 @@ export const cookieBannerVisible = signal(storedChoice() === null);
 })
 export class CookieBannerComponent {
   readonly visible = cookieBannerVisible;
+  /** Mostrar el aviso arriba en vez de sobre la barra de pestañas. */
+  readonly arriba = input(false);
 
   decide(decision: CookieChoice) {
     try {

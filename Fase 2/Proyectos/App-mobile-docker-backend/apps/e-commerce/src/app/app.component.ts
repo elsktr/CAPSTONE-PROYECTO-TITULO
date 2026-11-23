@@ -144,7 +144,8 @@ import { ToastService } from './services/toast.service';
 
       <app-cart-drawer *ngIf="!isAdminOnly()"></app-cart-drawer>
 
-      <app-cookie-banner></app-cookie-banner>
+      <!-- En Soporte, el chat ocupa la parte de abajo: el aviso va arriba para no taparlo. -->
+      <app-cookie-banner [arriba]="path() === '/support'"></app-cookie-banner>
       <!-- Invitación a iniciar sesión para los invitados, sin taparles la tienda -->
       <app-login-invite></app-login-invite>
 
@@ -204,7 +205,7 @@ export class AppComponent {
   cartCount = this.cart.count;
 
   /** Ruta actual sin parámetros, al día con cada navegación. */
-  private readonly path = signal(this.router.url.split('?')[0]);
+  protected readonly path = signal(this.router.url.split('?')[0]);
 
   showHeader = computed(() => this.auth.entryDismissed() && this.path() !== '/entry');
   showTabs = computed(() => this.auth.entryDismissed() && this.path() !== '/entry');

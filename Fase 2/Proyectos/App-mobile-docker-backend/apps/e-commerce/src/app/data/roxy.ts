@@ -23,6 +23,8 @@ export interface DatosRoxy {
   nombre: string | null;
   /** Inició sesión con una cuenta de cliente: puede consultar sus pedidos. */
   esCliente: boolean;
+  /** Inició sesión con una cuenta del personal (Gerente, Bodega, Vendedor): no compra, no tiene pedidos. */
+  esPersonal?: boolean;
   productos: Product[];
   /** Pedidos del cliente, de su cuenta; `null` si no se pudieron cargar o no hay sesión. */
   pedidos: PedidoCliente[] | null;
@@ -276,6 +278,9 @@ export function responder(mensaje: string, contexto: ContextoRoxy, datos: DatosR
 }
 
 function consultaDePedido(numero: number | null, datos: DatosRoxy): string {
+  if (datos.esPersonal) {
+    return 'Estás con una *cuenta del personal* de la tienda, que no hace compras, así que no tiene pedidos propios 🛠️. Los pedidos de los clientes se despachan desde *Envíos*, en la app de bodega. Para revisar una compra tuya, inicia sesión con tu cuenta de cliente.';
+  }
   if (!datos.esCliente) {
     return 'Para ver el estado de tu pedido, *inicia sesión* con la cuenta con que compraste: tus pedidos aparecen en *Mis pedidos* con su número de seguimiento 📦.';
   }

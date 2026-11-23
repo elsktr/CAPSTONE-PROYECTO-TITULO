@@ -81,6 +81,11 @@ describe('Roxy', () => {
 
   it('a un invitado le pide iniciar sesión para ver su pedido', () => {
     expect(conversar(['¿dónde está mi pedido?'])[0]).toContain('inicia sesión');
+    // Con sesión del personal no le pide iniciar sesión: le explica que esa cuenta no compra.
+    const personal: DatosRoxy = { ...INVITADO, esPersonal: true };
+    const [aPersonal] = conversar(['¿dónde está mi pedido?'], personal);
+    expect(aPersonal).toContain('cuenta del personal');
+    expect(aPersonal).not.toContain('*inicia sesión* con la cuenta con que compraste');
   });
 
   it('a un cliente le muestra sus pedidos y, si le da el número, el detalle', () => {
