@@ -18,6 +18,9 @@ import { ComprasService } from './compras.service.js';
 import { ResumenVentasService } from './resumen-ventas.service.js';
 import { VentasPosService } from './ventas-pos.service.js';
 
+/** Página de pago de la tienda, que usa rutas con `#`. */
+const PAGINA_DE_PAGO = '/#/pago';
+
 /**
  * Compra web y venta en tienda. En el diseño el checkout es de Ventas y el retorno del pago
  * es de Pagos; aquí comparten controlador porque en este servicio único los resuelve la misma saga.
@@ -109,11 +112,13 @@ export class VentasController {
   /**
    * Adonde Webpay devuelve al comprador, por GET o por POST de formulario. No resuelve el
    * pago: lleva al comprador a la página de pago de la tienda, que lo informa a `retorno`.
-   * La redirección es relativa, así que vuelve a la misma tienda por la que llegó.
+   * La redirección es relativa, así que vuelve a la misma tienda por la que llegó. Va a la ruta
+   * con `#` porque la tienda navega así: a `/pago` llegaba a la portada y el pago nunca se
+   * confirmaba, la compra vencía y el pedido no llegaba a bodega.
    */
   @All('pagos/webpay/vuelta')
   @Publica()
-  @Redirect('/pago', 303)
+  @Redirect(PAGINA_DE_PAGO, 303)
   vuelta(@Query() consulta: Record<string, unknown>, @Body() cuerpo: unknown): { url: string } {
     const datos = { ...consulta, ...(typeof cuerpo === 'object' && cuerpo !== null ? cuerpo : {}) } as Record<string, unknown>;
     const valor = (nombre: string) => (typeof datos[nombre] === 'string' ? (datos[nombre] as string) : '');
@@ -121,10 +126,10 @@ export class VentasController {
     // Tiempo agotado en el formulario: no llega token.
     const anulado = valor('TBK_TOKEN');
     if (anulado) {
-      return { url: `/pago?token_ws=${encodeURIComponent(anulado)}&anulado=1` };
+      return { url: `${PAGINA_DE_PAGO}?token_ws=${encodeURIComponent(anulado)}&anulado=1` };
     }
     const token = valor('token_ws');
-    return { url: token ? `/pago?token_ws=${encodeURIComponent(token)}` : '/pago?agotado=1' };
+    return { url: token ? `${PAGINA_DE_PAGO}?token_ws=${encodeURIComponent(token)}` : `${PAGINA_DE_PAGO}?agotado=1` };
   }
 }
 
