@@ -12,6 +12,7 @@ import {
   crearCinturonReal,
   crearCuerpoReal,
   crearPrendaReal,
+  ocultarTapado,
   posicionesCuerpo,
   tieneModeloReal,
 } from './cuerpo-real';
@@ -565,6 +566,7 @@ export class EscenaManiqui {
       // La parte de arriba va por fuera del pantalón: se saca de él además del cuerpo.
       const debajo = abajo ? [] : puestas.filter((x) => x.abajo).map((x) => x.grupo);
       const resultado = crearPrendaReal(modelo, m, cuerpo, { tipo: p.tipo, contorno: p.contorno, largo: p.largo, color: p.color, seSube: p.seSube }, posiciones, debajo);
+      for (const grupo of debajo) ocultarTapado(grupo, resultado.cobertura.cubre);
       ropa.add(resultado.grupo);
       puestas.push({ abajo, grupo: resultado.grupo });
       coberturas.push(resultado.cobertura);
@@ -574,7 +576,7 @@ export class EscenaManiqui {
       .filter((x): x is { prenda: PrendaEnEscena; mallas: Parameters<typeof crearPrendaReal>[1] } => x !== null)
       .sort((a, b) => Number(b.prenda.tipo === 'pantalon') - Number(a.prenda.tipo === 'pantalon'));
     for (const { prenda: p, mallas: m } of lista) vestir(p, m);
-    if (prenda?.tipo === 'cinturon') ropa.add(crearCinturonReal(posiciones, cuerpo, prenda.color));
+    if (prenda?.tipo === 'cinturon') ropa.add(crearCinturonReal(modelo, posiciones, cuerpo, prenda.color, puestas.find((x) => x.abajo)?.grupo));
     // La piel bajo las prendas se oculta según dónde queden: el cuerpo depende de las tallas.
     const talla = [prenda, complemento?.prenda].map((p) => (p ? `${p.tipo}:${p.contorno}:${p.largo}` : '')).join('|');
     this.cambiarFigura(`real:${JSON.stringify(cuerpo)}:${talla}`, () => crearCuerpoReal(modelo, posiciones, coberturas), () =>

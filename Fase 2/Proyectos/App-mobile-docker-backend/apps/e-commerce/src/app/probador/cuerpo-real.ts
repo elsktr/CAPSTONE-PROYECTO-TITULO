@@ -171,6 +171,10 @@ function invertir(filas: { valor: number; medida: number }[], objetivo: number):
   return objetivo < filas[0]!.medida ? filas[0]!.valor : filas[filas.length - 1]!.valor;
 }
 
+/** Hasta qué valor la deformación de cadera se aplica entera, y qué parte de lo que pase de ahí. */
+const CADERA_PLENA = 1;
+const EXCESO_CADERA = 0.3;
+
 /** Cuánto aplicar de cada parámetro (con signo) y la escala final, para un cuerpo dado. */
 export function resolverCuerpo(calibracion: Calibracion, cuerpo: MedidasCuerpo): { valores: Record<Parametro, number>; escala: number } {
   const { tablas } = calibracion;
@@ -187,6 +191,10 @@ export function resolverCuerpo(calibracion: Calibracion, cuerpo: MedidasCuerpo):
     const diferencia = cuerpo[m] / escala - sinControl;
     valores[m] = invertir(tablas[m].map((f) => ({ valor: f.valor, medida: f[m] - base })), diferencia);
   }
+  // La deformación de cadera solo abulta el costado de los muslos: en una persona baja y de mucho
+  // peso, que pide todo su rango, dibujaba alforjas y la tela las copiaba. El exceso se dibuja a
+  // medias; la talla y el ajuste se siguen calculando con la medida real.
+  if (valores.cadera > CADERA_PLENA) valores.cadera = CADERA_PLENA + (valores.cadera - CADERA_PLENA) * EXCESO_CADERA;
   return { valores, escala };
 }
 
@@ -204,12 +212,37 @@ function deformar(malla: MallaDeformable, valores: Record<Parametro, number>, es
   return posiciones;
 }
 
+/**
+ * Promedia las normales de los vértices que ocupan el mismo punto. El modelo duplica los vértices
+ * en las costuras de sus texturas, y sin esto cada lado se sombrea por su cuenta y se ve una línea.
+ */
+function unirCosturas(resultado: THREE.BufferGeometry, posiciones: Float32Array): void {
+  const normales = resultado.getAttribute('normal');
+  const grupos = new Map<string, number[]>();
+  for (let i = 0; i < posiciones.length; i += 3) {
+    const clave = `${Math.round(posiciones[i]! * 5000)},${Math.round(posiciones[i + 1]! * 5000)},${Math.round(posiciones[i + 2]! * 5000)}`;
+    const grupo = grupos.get(clave);
+    if (grupo) grupo.push(i / 3);
+    else grupos.set(clave, [i / 3]);
+  }
+  const suma = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  for (const grupo of grupos.values()) {
+    if (grupo.length < 2) continue;
+    suma.set(0, 0, 0);
+    for (const v of grupo) suma.add(normal.fromBufferAttribute(normales, v));
+    suma.normalize();
+    for (const v of grupo) normales.setXYZ(v, suma.x, suma.y, suma.z);
+  }
+}
+
 function geometria(malla: MallaDeformable, posiciones: Float32Array): THREE.BufferGeometry {
   const resultado = new THREE.BufferGeometry();
   resultado.setAttribute('position', new THREE.BufferAttribute(posiciones, 3));
   if (malla.uv) resultado.setAttribute('uv', malla.uv.clone());
   if (malla.indices) resultado.setIndex(malla.indices.clone());
   resultado.computeVertexNormals();
+  unirCosturas(resultado, posiciones);
   return resultado;
 }
 
@@ -228,23 +261,123 @@ export interface Cobertura {
 /** Malla del cuerpo deformado, con material de maniquí y sin la piel que cubre la prenda. */
 export function crearCuerpoReal(modelo: ModeloReal, posiciones: Float32Array, coberturas: Cobertura[] = []): THREE.Mesh {
   const resultado = geometria(modelo.cuerpo, posiciones);
-  const indices = resultado.getIndex();
-  if (coberturas.length && indices) {
-    // La piel se oculta si la cubre cualquiera de las prendas puestas.
-    const conjuntos = coberturas.map((c) => ({ ocultos: new Set(c.ocultos), cubre: c.cubre }));
-    const oculto = (v: number) =>
-      conjuntos.some((c) => c.ocultos.has(v) && c.cubre(posiciones[v * 3]!, posiciones[v * 3 + 1]!, posiciones[v * 3 + 2]!));
+  if (coberturas.length && resultado.getIndex()) recortarPiel(resultado, coberturas);
+  const material = new THREE.MeshPhysicalMaterial({ color: '#d8cfc4', roughness: 0.5, clearcoat: 0.2, clearcoatRoughness: 0.6 });
+  return new THREE.Mesh(resultado, material);
+}
+
+/** Pasos con que se busca, a lo largo de un lado de un triángulo, dónde empieza la prenda. */
+const PASOS_RECORTE = 8;
+
+/**
+ * Quita la piel que cubre la prenda. Los triángulos que quedan a medias se recortan en el borde de
+ * la prenda: en un abdomen grande la piel se estira, y un triángulo de varios centímetros que
+ * cruzaba la basta quedaba entero y asomaba por la tela, como un trozo roto sobre ella.
+ */
+function recortarPiel(geometriaPiel: THREE.BufferGeometry, coberturas: Cobertura[]): void {
+  const indices = geometriaPiel.getIndex()!;
+  const posicion = geometriaPiel.getAttribute('position');
+  const normal = geometriaPiel.getAttribute('normal');
+  const uv = geometriaPiel.getAttribute('uv') as THREE.BufferAttribute | undefined;
+  const p = posicion.array as Float32Array;
+  // La piel se oculta si la cubre cualquiera de las prendas puestas.
+  const conjuntos = coberturas.map((c) => ({ ocultos: new Set(c.ocultos), cubre: c.cubre }));
+  const oculto = (v: number) => conjuntos.some((c) => c.ocultos.has(v) && c.cubre(p[v * 3]!, p[v * 3 + 1]!, p[v * 3 + 2]!));
+
+  const nuevas: { a: number; b: number; t: number }[] = [];
+  const cortes = new Map<string, number>();
+  // Punto del lado entre `a` (oculto) y `b` (visible) donde termina la prenda, o -1 si `b` queda
+  // fuera de la prenda que oculta a `a` (el borde de lo que cubre).
+  const corte = (a: number, b: number): number => {
+    const clave = `${a},${b}`;
+    const guardado = cortes.get(clave);
+    if (guardado !== undefined) return guardado;
+    const prenda = conjuntos.find((c) => c.ocultos.has(a) && c.ocultos.has(b) && c.cubre(p[a * 3]!, p[a * 3 + 1]!, p[a * 3 + 2]!));
+    let resultado = -1;
+    if (prenda) {
+      let tapado = 0;
+      let libre = 1;
+      for (let paso = 0; paso < PASOS_RECORTE; paso++) {
+        const t = (tapado + libre) / 2;
+        const punto = [0, 1, 2].map((k) => p[a * 3 + k]! + (p[b * 3 + k]! - p[a * 3 + k]!) * t) as [number, number, number];
+        if (prenda.cubre(...punto)) tapado = t;
+        else libre = t;
+      }
+      resultado = posicion.count + nuevas.length;
+      nuevas.push({ a, b, t: tapado });
+    }
+    cortes.set(clave, resultado);
+    return resultado;
+  };
+
+  const visibles: number[] = [];
+  for (let t = 0; t < indices.count; t += 3) {
+    const v = [indices.getX(t), indices.getX(t + 1), indices.getX(t + 2)];
+    const tapados = v.map(oculto);
+    const cuenta = tapados.filter(Boolean).length;
+    if (cuenta === 3) continue;
+    if (cuenta === 0) {
+      visibles.push(...v);
+      continue;
+    }
+    // Se rota el triángulo (sin cambiar su orden) para que el vértice distinto quede primero.
+    const distinto = tapados.findIndex((x) => (cuenta === 1 ? x : !x));
+    const [a, b, c] = [v[distinto]!, v[(distinto + 1) % 3]!, v[(distinto + 2) % 3]!];
+    if (cuenta === 1) {
+      // `a` oculto: queda el cuadrilátero b, c y los cortes hacia `a`.
+      const ca = corte(a, c);
+      const ba = corte(a, b);
+      if (ca < 0 || ba < 0) visibles.push(a, b, c);
+      else visibles.push(b, c, ca, b, ca, ba);
+    } else {
+      // `a` visible: queda el triángulo de `a` hasta los cortes.
+      const ab = corte(b, a);
+      const ac = corte(c, a);
+      if (ab < 0 || ac < 0) visibles.push(a, b, c);
+      else visibles.push(a, ab, ac);
+    }
+  }
+
+  if (nuevas.length) {
+    const total = posicion.count + nuevas.length;
+    const mezclar = (origen: ArrayLike<number>, ancho: number) => {
+      const destino = new Float32Array(total * ancho);
+      destino.set(origen as Float32Array);
+      nuevas.forEach(({ a, b, t }, n) => {
+        for (let k = 0; k < ancho; k++) destino[(posicion.count + n) * ancho + k] = origen[a * ancho + k]! + (origen[b * ancho + k]! - origen[a * ancho + k]!) * t;
+      });
+      return destino;
+    };
+    const normales = mezclar(normal.array, 3);
+    for (let n = posicion.count; n < total; n++) {
+      const largo = Math.hypot(normales[n * 3]!, normales[n * 3 + 1]!, normales[n * 3 + 2]!) || 1;
+      for (let k = 0; k < 3; k++) normales[n * 3 + k]! /= largo;
+    }
+    geometriaPiel.setAttribute('position', new THREE.BufferAttribute(mezclar(p, 3), 3));
+    geometriaPiel.setAttribute('normal', new THREE.BufferAttribute(normales, 3));
+    if (uv) geometriaPiel.setAttribute('uv', new THREE.BufferAttribute(mezclar(uv.array, 2), 2));
+  }
+  geometriaPiel.setIndex(visibles);
+}
+
+/** Deja de dibujar lo que la prenda de arriba tapa: así el pantalón nunca asoma por la tela. */
+export function ocultarTapado(grupo: THREE.Group, cubre: Cobertura['cubre']): void {
+  grupo.traverse((hijo) => {
+    if (!(hijo instanceof THREE.Mesh)) return;
+    const g = hijo.geometry as THREE.BufferGeometry;
+    const indices = g.getIndex();
+    if (!indices) return;
+    const p = g.getAttribute('position');
+    const tapado = (v: number) => cubre(p.getX(v), p.getY(v), p.getZ(v));
     const visibles: number[] = [];
     for (let t = 0; t < indices.count; t += 3) {
       const a = indices.getX(t);
       const b = indices.getX(t + 1);
       const c = indices.getX(t + 2);
-      if (!(oculto(a) && oculto(b) && oculto(c))) visibles.push(a, b, c);
+      if (!(tapado(a) && tapado(b) && tapado(c))) visibles.push(a, b, c);
     }
-    resultado.setIndex(visibles);
-  }
-  const material = new THREE.MeshPhysicalMaterial({ color: '#d8cfc4', roughness: 0.5, clearcoat: 0.2, clearcoatRoughness: 0.6 });
-  return new THREE.Mesh(resultado, material);
+    g.setIndex(visibles);
+  });
 }
 
 /** Medidas de la talla de la prenda, en centímetros, y su color. */
@@ -293,26 +426,30 @@ export function crearPrendaReal(
   const calibrada = modelo.calibracion.prendas[talla.tipo]!;
   const { valores, escala } = resolverCuerpo(modelo.calibracion, cuerpo);
   const partes = mallas.map((malla) => ({ malla, posiciones: deformar(malla, valores, escala) }));
-  const cobertura =
+  const sinAjustar = partes.map((p) => p.posiciones.slice());
+  const ajustada =
     calibrada.parte === 'arriba'
       ? ajustarArriba(
           partes.map((p) => p.posiciones),
           calibrada,
           cuerpo,
           talla,
-          { prenda: mallas.map((m) => m.base), cuerpo: modelo.cuerpo.base, pecho: interpolar(modelo.calibracion.tablas.pecho, 'pecho', 0) },
+          { prenda: mallas.map((m) => m.base), cuerpo: modelo.cuerpo.base, indices: mallas.map((m) => m.indices) },
           posicionesDelCuerpo,
         )
-      : ajustarAbajo(partes.map((p) => p.posiciones), calibrada, cuerpo, talla);
+      : { ...ajustarAbajo(partes.map((p) => p.posiciones), calibrada, cuerpo, talla, mallas.map((m) => m.indices)), tronco: undefined };
+  const posiciones = partes.map((p) => p.posiciones);
   // Lo que quede dentro del cuerpo (un abdomen o un brazo más grueso que la tela) sale a la piel.
-  if (posicionesDelCuerpo) sacarDelCuerpo(partes.map((p) => p.posiciones), posicionesDelCuerpo, modelo.cuerpo.indices);
-  for (const otra of debajo) {
-    otra.traverse((hijo) => {
-      if (!(hijo instanceof THREE.Mesh)) return;
-      const geometria = hijo.geometry as THREE.BufferGeometry;
-      sacarDelCuerpo(partes.map((p) => p.posiciones), geometria.getAttribute('position').array as Float32Array, geometria.getIndex(), SEPARACION_CAPAS, 1);
-    });
+  if (posicionesDelCuerpo) {
+    sacarDelCuerpo(posiciones, posicionesDelCuerpo, modelo.cuerpo.indices);
+    if (calibrada.parte === 'arriba') {
+      partes.forEach(({ malla, posiciones: p }, i) => alisarCambio(malla, sinAjustar[i]!, p));
+      sacarDelCuerpo(posiciones, posicionesDelCuerpo, modelo.cuerpo.indices);
+    }
   }
+  if (ajustada.tronco && debajo.length) sobreLaCapa(posiciones, debajo, ajustada.tronco);
+  // Lo que cubre se mide con la tela ya en su lugar.
+  ajustada.medir();
 
   const grupo = new THREE.Group();
   for (const { malla, posiciones } of partes) {
@@ -320,20 +457,210 @@ export function crearPrendaReal(
     const color = new THREE.Color(secundaria ? '#e9e4da' : talla.color);
     grupo.add(new THREE.Mesh(geometria(malla, posiciones), materialPrenda(talla.tipo, malla, color)));
   }
-  return { grupo, cobertura: { ocultos: calibrada.ocultos, cubre: cobertura } };
+  quitarLoTapado(grupo, partes.map((p) => Boolean(p.malla.material?.name.startsWith('Secundaria'))));
+  return { grupo, cobertura: { ocultos: calibrada.ocultos, cubre: ajustada.cubre } };
+}
+
+/**
+ * Deja de dibujar lo que la parte principal de una prenda tapa de la secundaria: de la camisa bajo
+ * una chaqueta solo se ve lo que queda en la abertura, y al borde de ella la camisa pasa por debajo.
+ * Las dos capas se ajustan al cuerpo por separado, y en un cuerpo de mucho peso se cruzaban.
+ */
+function quitarLoTapado(grupo: THREE.Group, secundarias: boolean[]): void {
+  if (!secundarias.some(Boolean) || secundarias.every(Boolean)) return;
+  const mallas = grupo.children as THREE.Mesh[];
+  let abajo = Infinity;
+  let arriba = -Infinity;
+  let sumaZ = 0;
+  let cuenta = 0;
+  for (const malla of mallas) {
+    const p = malla.geometry.getAttribute('position').array;
+    for (let i = 0; i < p.length; i += 3) {
+      abajo = Math.min(abajo, p[i + 1]!);
+      arriba = Math.max(arriba, p[i + 1]!);
+      sumaZ += p[i + 2]!;
+      cuenta++;
+    }
+  }
+  const centroZ = sumaZ / (cuenta || 1);
+  const franjas = Math.ceil((arriba - abajo) / FRANJA_CAPA) + 1;
+  const celda = (x: number, y: number, z: number) => {
+    const s = Math.floor((Math.atan2(x, z - centroZ) / (2 * Math.PI) + 0.5) * SECTORES_CAPA) % SECTORES_CAPA;
+    return Math.floor((y - abajo) / FRANJA_CAPA) * SECTORES_CAPA + s;
+  };
+  const tapado = new Uint8Array(franjas * SECTORES_CAPA);
+  // Lo más adentro que llega la parte principal en cada celda.
+  const radioTapa = new Float32Array(franjas * SECTORES_CAPA).fill(Infinity);
+  const marcar = (x: number, y: number, z: number) => {
+    const c = celda(x, y, z);
+    tapado[c] = 1;
+    radioTapa[c] = Math.min(radioTapa[c]!, Math.hypot(x, z - centroZ));
+  };
+  mallas.forEach((malla, parte) => {
+    if (secundarias[parte]) return;
+    const p = malla.geometry.getAttribute('position').array;
+    const indices = malla.geometry.getIndex()?.array ?? [];
+    for (let t = 0; t < indices.length; t += 3) recorrerTriangulo(p, indices[t]! * 3, indices[t + 1]! * 3, indices[t + 2]! * 3, marcar);
+  });
+  const radioCerca = (c: number) => {
+    const f = Math.floor(c / SECTORES_CAPA);
+    const s = c - f * SECTORES_CAPA;
+    let radio = Infinity;
+    for (let df = -1; df <= 1; df++) {
+      if (f + df < 0 || f + df >= franjas) continue;
+      for (let ds = -1; ds <= 1; ds++) radio = Math.min(radio, radioTapa[(f + df) * SECTORES_CAPA + ((s + ds + SECTORES_CAPA) % SECTORES_CAPA)]!);
+    }
+    return radio;
+  };
+  // Solo cuenta lo tapado también alrededor: al borde de la abertura la camisa sigue debajo.
+  const rodeado = (c: number) => {
+    const f = Math.floor(c / SECTORES_CAPA);
+    const s = c - f * SECTORES_CAPA;
+    for (let df = -1; df <= 1; df++) {
+      for (let ds = -2; ds <= 2; ds++) {
+        if (f + df < 0 || f + df >= franjas || !tapado[(f + df) * SECTORES_CAPA + ((s + ds + SECTORES_CAPA) % SECTORES_CAPA)]) return false;
+      }
+    }
+    return true;
+  };
+  mallas.forEach((malla, parte) => {
+    if (!secundarias[parte]) return;
+    const g = malla.geometry;
+    const indices = g.getIndex();
+    if (!indices) return;
+    const p = g.getAttribute('position');
+    const oculto = (v: number) => rodeado(celda(p.getX(v), p.getY(v), p.getZ(v)));
+    const visibles: number[] = [];
+    for (let t = 0; t < indices.count; t += 3) {
+      const a = indices.getX(t);
+      const b = indices.getX(t + 1);
+      const c = indices.getX(t + 2);
+      if (!(oculto(a) && oculto(b) && oculto(c))) visibles.push(a, b, c);
+    }
+    g.setIndex(visibles);
+    const puntos = p.array as Float32Array;
+    for (let i = 0; i < puntos.length; i += 3) {
+      const radio = radioCerca(celda(puntos[i]!, puntos[i + 1]!, puntos[i + 2]!));
+      const propio = Math.hypot(puntos[i]!, puntos[i + 2]! - centroZ);
+      if (!Number.isFinite(radio) || propio <= radio - SEPARACION_BAJO_TAPA) continue;
+      const k = Math.max(radio - SEPARACION_BAJO_TAPA, 0) / propio;
+      puntos[i] = puntos[i]! * k;
+      puntos[i + 2] = centroZ + (puntos[i + 2]! - centroZ) * k;
+    }
+    g.computeVertexNormals();
+    unirCosturas(g, puntos);
+  });
+}
+
+/** Cuánto bajo la parte principal pasa la secundaria, en metros. */
+const SEPARACION_BAJO_TAPA = 0.004;
+
+/** Recorre la superficie de un triángulo con puntos a no más de `PASO_CAPA` entre sí. */
+function recorrerTriangulo(p: ArrayLike<number>, a: number, b: number, c: number, accion: (x: number, y: number, z: number) => void): void {
+  const lado = Math.max(
+    Math.hypot(p[a]! - p[b]!, p[a + 1]! - p[b + 1]!, p[a + 2]! - p[b + 2]!),
+    Math.hypot(p[b]! - p[c]!, p[b + 1]! - p[c + 1]!, p[b + 2]! - p[c + 2]!),
+    Math.hypot(p[c]! - p[a]!, p[c + 1]! - p[a + 1]!, p[c + 2]! - p[a + 2]!),
+  );
+  const n = Math.max(Math.ceil(lado / PASO_CAPA), 1);
+  for (let u = 0; u <= n; u++) {
+    for (let v = 0; v <= n - u; v++) {
+      const wa = u / n;
+      const wb = v / n;
+      const wc = 1 - wa - wb;
+      accion(p[a]! * wa + p[b]! * wb + p[c]! * wc, p[a + 1]! * wa + p[b + 1]! * wb + p[c + 1]! * wc, p[a + 2]! * wa + p[b + 2]! * wb + p[c + 2]! * wc);
+    }
+  }
+}
+
+/** Vecinos de cada punto de una malla, con los vértices duplicados en las costuras unidos en uno. */
+interface VecinosMalla {
+  punto: Int32Array;
+  puntos: number;
+  inicio: Int32Array;
+  lista: Int32Array;
+}
+const vecinosPorMalla = new WeakMap<MallaDeformable, VecinosMalla>();
+
+function vecinosDe(malla: MallaDeformable): VecinosMalla {
+  const guardados = vecinosPorMalla.get(malla);
+  if (guardados) return guardados;
+  const base = malla.base;
+  const punto = new Int32Array(base.length / 3);
+  const porClave = new Map<string, number>();
+  for (let i = 0; i < base.length; i += 3) {
+    const clave = `${Math.round(base[i]! * 5000)},${Math.round(base[i + 1]! * 5000)},${Math.round(base[i + 2]! * 5000)}`;
+    let n = porClave.get(clave);
+    if (n === undefined) porClave.set(clave, (n = porClave.size));
+    punto[i / 3] = n;
+  }
+  const puntos = porClave.size;
+  const conjuntos = Array.from({ length: puntos }, () => new Set<number>());
+  const indices = malla.indices;
+  if (indices) {
+    for (let t = 0; t < indices.count; t += 3) {
+      const a = punto[indices.getX(t)]!;
+      const b = punto[indices.getX(t + 1)]!;
+      const c = punto[indices.getX(t + 2)]!;
+      conjuntos[a]!.add(b).add(c);
+      conjuntos[b]!.add(a).add(c);
+      conjuntos[c]!.add(a).add(b);
+    }
+  }
+  const inicio = new Int32Array(puntos + 1);
+  conjuntos.forEach((s, i) => (inicio[i + 1] = inicio[i]! + s.size));
+  const lista = new Int32Array(inicio[puntos]!);
+  conjuntos.forEach((s, i) => lista.set([...s], inicio[i]!));
+  const vecinos = { punto, puntos, inicio, lista };
+  vecinosPorMalla.set(malla, vecinos);
+  return vecinos;
+}
+
+/** Cuántas pasadas y con qué fuerza se alisa el ajuste de la tela. */
+const PASADAS_ALISADO = 14;
+const FUERZA_ALISADO = 0.6;
+
+/**
+ * Alisa el ajuste de la tela sobre su propia malla. Cada punto se corrige por separado al apoyarlo
+ * en el cuerpo, y eso dejaba abollones, ruedos dentados y puños sueltos en los cuerpos robustos.
+ * Se alisa el desplazamiento y no la forma: cuellos, dobladillos y costuras se conservan.
+ */
+function alisarCambio(malla: MallaDeformable, antes: Float32Array, despues: Float32Array): void {
+  const { punto, puntos, inicio, lista } = vecinosDe(malla);
+  let cambio = new Float32Array(puntos * 3);
+  for (let v = 0; v < punto.length; v++) {
+    for (let k = 0; k < 3; k++) cambio[punto[v]! * 3 + k] = despues[v * 3 + k]! - antes[v * 3 + k]!;
+  }
+  let siguiente = new Float32Array(puntos * 3);
+  for (let pasada = 0; pasada < PASADAS_ALISADO; pasada++) {
+    for (let n = 0; n < puntos; n++) {
+      const desde = inicio[n]!;
+      const hasta = inicio[n + 1]!;
+      for (let k = 0; k < 3; k++) {
+        const propio = cambio[n * 3 + k]!;
+        if (hasta === desde) {
+          siguiente[n * 3 + k] = propio;
+          continue;
+        }
+        let suma = 0;
+        for (let j = desde; j < hasta; j++) suma += cambio[lista[j]! * 3 + k]!;
+        siguiente[n * 3 + k] = propio + FUERZA_ALISADO * (suma / (hasta - desde) - propio);
+      }
+    }
+    [cambio, siguiente] = [siguiente, cambio];
+  }
+  for (let v = 0; v < punto.length; v++) {
+    for (let k = 0; k < 3; k++) despues[v * 3 + k] = antes[v * 3 + k]! + cambio[punto[v]! * 3 + k]!;
+  }
 }
 
 /** Separación mínima entre la tela y la piel al sacarla del cuerpo, en metros. */
 const SEPARACION_COLISION = 0.006;
 /** Separación entre una prenda y la que lleva debajo, en metros. */
-const SEPARACION_CAPAS = 0.004;
+const SEPARACION_CAPAS = 0.006;
 /** Lado de cada celda de la grilla con que se buscan los vértices del cuerpo, en metros. */
 const CELDA = 0.03;
-/**
- * Cuántas celdas a la redonda se busca la piel más cercana, como máximo. Entre dos prendas se busca
- * solo en las vecinas: más lejos, la de abajo ya no está debajo (la pretina del pantalón no está
- * bajo el abdomen de la polera).
- */
+/** Cuántas celdas a la redonda se busca la piel más cercana, como máximo. */
 const ALCANCE_MAXIMO = 5;
 
 /**
@@ -345,8 +672,6 @@ function sacarDelCuerpo(
   posiciones: Float32Array[],
   cuerpo: Float32Array,
   indices: THREE.BufferAttribute | null,
-  separacion = SEPARACION_COLISION,
-  alcanceMaximo = ALCANCE_MAXIMO,
 ): void {
   const malla = new THREE.BufferGeometry();
   malla.setAttribute('position', new THREE.BufferAttribute(cuerpo, 3));
@@ -363,6 +688,7 @@ function sacarDelCuerpo(
     else grilla.set(k, [i]);
   }
 
+  const separacion = SEPARACION_COLISION;
   cadaVertice(posiciones, (p, i) => {
     const x = p[i]!;
     const y = p[i + 1]!;
@@ -374,7 +700,7 @@ function sacarDelCuerpo(
     let distancia = Infinity;
     // Primero las celdas vecinas; si no hay piel cerca (la tela quedó muy adentro de un abdomen
     // grande), se busca más lejos.
-    for (let alcance = 1; cercano < 0 && alcance <= alcanceMaximo; alcance++) {
+    for (let alcance = 1; cercano < 0 && alcance <= ALCANCE_MAXIMO; alcance++) {
       for (let dx = -alcance; dx <= alcance; dx++) {
         for (let dy = -alcance; dy <= alcance; dy++) {
           for (let dz = -alcance; dz <= alcance; dz++) {
@@ -409,6 +735,118 @@ function sacarDelCuerpo(
   malla.dispose();
 }
 
+/** Alto de cada franja y cantidad de direcciones con que se mide la prenda de abajo. */
+const FRANJA_CAPA = 0.02;
+const SECTORES_CAPA = 72;
+/** Distancia máxima entre los puntos con que se recorre cada triángulo de la prenda de abajo, en metros. */
+const PASO_CAPA = 0.012;
+/** Cuánto se atenúa el corrimiento por cada franja que se aleja de la zona que lo necesita, en metros. */
+const ATENUACION_CAPA = 0.006;
+
+/**
+ * Lleva la tela de una prenda de arriba por fuera de la que va debajo. Se mide el contorno de la
+ * prenda de abajo recorriendo la superficie de sus triángulos, no solo sus vértices: en un cuerpo
+ * de mucho peso la malla se estira y entre vértice y vértice el pantalón atravesaba la tela.
+ * El corrimiento se suaviza y se aplica igual a toda la tela de una zona, así no deja bultos ni
+ * cruza las capas del dobladillo.
+ */
+function sobreLaCapa(posiciones: Float32Array[], debajo: THREE.Group[], tronco: Float32Array[]): void {
+  let bastaArriba = Infinity;
+  cadaVertice(posiciones, (p, i, parte) => {
+    if (tronco[parte]![i / 3]! > 0) bastaArriba = Math.min(bastaArriba, p[i + 1]!);
+  });
+  const mallas: { p: ArrayLike<number>; indices: ArrayLike<number> }[] = [];
+  let tope = -Infinity;
+  let sumaZ = 0;
+  let cuentaZ = 0;
+  for (const grupo of debajo) {
+    grupo.traverse((hijo) => {
+      if (!(hijo instanceof THREE.Mesh)) return;
+      const g = hijo.geometry as THREE.BufferGeometry;
+      const p = g.getAttribute('position').array;
+      const indices = g.getIndex()?.array;
+      if (!indices) return;
+      mallas.push({ p, indices });
+      for (let i = 0; i < p.length; i += 3) {
+        if (p[i + 1]! < bastaArriba) continue;
+        tope = Math.max(tope, p[i + 1]!);
+        sumaZ += p[i + 2]!;
+        cuentaZ++;
+      }
+    });
+  }
+  if (!cuentaZ) return;
+  const centroZ = sumaZ / cuentaZ;
+  const base = Math.floor(bastaArriba / FRANJA_CAPA) - 1;
+  const franjas = Math.floor(tope / FRANJA_CAPA) - base + 8;
+  const sector = (x: number, z: number) => Math.floor((Math.atan2(x, z - centroZ) / (2 * Math.PI) + 0.5) * SECTORES_CAPA) % SECTORES_CAPA;
+  const celda = (f: number, s: number) => f * SECTORES_CAPA + ((s + SECTORES_CAPA) % SECTORES_CAPA);
+
+  const contorno = new Float32Array(franjas * SECTORES_CAPA);
+  const marcar = (x: number, y: number, z: number) => {
+    const f = Math.floor(y / FRANJA_CAPA) - base;
+    if (f < 0 || f >= franjas) return;
+    const c = celda(f, sector(x, z));
+    contorno[c] = Math.max(contorno[c]!, Math.hypot(x, z - centroZ));
+  };
+  for (const { p, indices } of mallas) {
+    for (let t = 0; t < indices.length; t += 3) {
+      const a = indices[t]! * 3;
+      const b = indices[t + 1]! * 3;
+      const c = indices[t + 2]! * 3;
+      if (Math.max(p[a + 1]!, p[b + 1]!, p[c + 1]!) < bastaArriba) continue;
+      recorrerTriangulo(p, a, b, c, marcar);
+    }
+  }
+
+  // Cuánto le falta a la tela para quedar por fuera, en cada zona.
+  let necesario = new Float32Array(franjas * SECTORES_CAPA);
+  cadaVertice(posiciones, (p, i, parte) => {
+    if (tronco[parte]![i / 3]! === 0) return;
+    const f = Math.floor(p[i + 1]! / FRANJA_CAPA) - base;
+    if (f < 0 || f >= franjas) return;
+    const c = celda(f, sector(p[i]!, p[i + 2]!));
+    if (!contorno[c]) return;
+    necesario[c] = Math.max(necesario[c]!, contorno[c]! + SEPARACION_CAPAS - Math.hypot(p[i]!, p[i + 2]! - centroZ));
+  });
+  // Se extiende a las zonas vecinas (la tela tiene menos puntos que la grilla) y se suaviza.
+  const vecinas = (origen: Float32Array, combinar: (valores: number[]) => number, radioF: number, radioS: number) => {
+    const destino = new Float32Array(origen.length);
+    for (let f = 0; f < franjas; f++) {
+      for (let s = 0; s < SECTORES_CAPA; s++) {
+        const valores: number[] = [];
+        for (let df = -radioF; df <= radioF; df++) {
+          if (f + df < 0 || f + df >= franjas) continue;
+          for (let ds = -radioS; ds <= radioS; ds++) valores.push(origen[celda(f + df, s + ds)]!);
+        }
+        destino[celda(f, s)] = combinar(valores);
+      }
+    }
+    return destino;
+  };
+  necesario = vecinas(necesario, (v) => Math.max(...v), 2, 4);
+  for (let f = 1; f < franjas; f++) {
+    for (let s = 0; s < SECTORES_CAPA; s++) necesario[celda(f, s)] = Math.max(necesario[celda(f, s)]!, necesario[celda(f - 1, s)]! - ATENUACION_CAPA);
+  }
+  for (let f = franjas - 2; f >= 0; f--) {
+    for (let s = 0; s < SECTORES_CAPA; s++) necesario[celda(f, s)] = Math.max(necesario[celda(f, s)]!, necesario[celda(f + 1, s)]! - ATENUACION_CAPA);
+  }
+  const promedio = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+  necesario = vecinas(vecinas(necesario, promedio, 1, 1), promedio, 1, 1);
+
+  cadaVertice(posiciones, (p, i, parte) => {
+    const peso = tronco[parte]![i / 3]!;
+    if (peso === 0) return;
+    const f = Math.floor(p[i + 1]! / FRANJA_CAPA) - base;
+    if (f < 0 || f >= franjas) return;
+    const r = Math.hypot(p[i]!, p[i + 2]! - centroZ);
+    if (r === 0) return;
+    const k = 1 + (necesario[celda(f, sector(p[i]!, p[i + 2]!))]! / r) * peso;
+    p[i] = p[i]! * k;
+    p[i + 2] = centroZ + (p[i + 2]! - centroZ) * k;
+  });
+}
+
 /** Recorre los vértices de todas las partes de una prenda. */
 function cadaVertice(posiciones: Float32Array[], accion: (p: Float32Array, i: number, parte: number) => void): void {
   posiciones.forEach((p, parte) => {
@@ -426,10 +864,10 @@ function ajustarArriba(
   calibrada: PrendaCalibrada,
   cuerpo: MedidasCuerpo,
   talla: TallaPrenda,
-  /** La prenda y el cuerpo sin deformar, y el pecho de ese cuerpo en centímetros. */
-  base: { prenda: Float32Array[]; cuerpo: Float32Array; pecho: number },
+  /** La prenda y el cuerpo sin deformar, y los triángulos de la prenda. */
+  base: { prenda: Float32Array[]; cuerpo: Float32Array; indices: (THREE.BufferAttribute | null)[] },
   posicionesDelCuerpo?: Float32Array,
-): (x: number, y: number, z: number) => boolean {
+): { cubre: (x: number, y: number, z: number) => boolean; tronco: Float32Array[]; medir: () => void } {
   const { ajuste } = calibrada;
   const { abajo, arriba, pecho, axila } = alturasDelTronco(posiciones, ajuste);
 
@@ -438,7 +876,7 @@ function ajustarArriba(
   const factor = (cuerpo.pecho + holguraTalla) / (cuerpo.pecho + Math.max(ajuste.holgura, 2));
   const centroZ = centroDelTronco(posiciones, pecho);
   // Qué es tronco y qué es manga se decide en el modelo sin deformar (ver `separarTronco`).
-  const { tronco, brazos } = separarTronco(base.prenda, base.cuerpo, ajuste, base.pecho);
+  const { tronco, brazos } = separarTronco(base.prenda, base.cuerpo, ajuste);
   cadaVertice(posiciones, (p, i, parte) => {
     const x = p[i]!;
     const y = p[i + 1]!;
@@ -493,14 +931,31 @@ function ajustarArriba(
 
   // Altura de la basta en cada dirección alrededor del cuerpo: no es pareja (los costados suelen
   // quedar más altos), y la piel solo se oculta donde la prenda de verdad la cubre.
-  const bastaPorSector = new Float32Array(sectores).fill(Infinity);
-  cadaVertice(posiciones, (p, i) => {
-    if (p[i + 1]! > pecho) return;
-    const s = sector(p[i]!, p[i + 2]!);
-    bastaPorSector[s] = Math.min(bastaPorSector[s]!, p[i + 1]!);
-  });
-  const bastaMasBaja = Math.min(...bastaPorSector);
-  return (x, y, z) => {
+  // Se mide sobre la superficie de la tela: en un abdomen grande la malla se estira, a un sector
+  // podían no tocarle vértices de la basta y la piel de esa dirección asomaba por la tela. Y se
+  // mide con la tela ya en su lugar (`medir`), después de la colisión con el cuerpo, que la mueve.
+  const bastaPorSector = new Float32Array(sectores);
+  let bastaMasBaja = Infinity;
+  const marcarBasta = (x: number, y: number, z: number) => {
+    if (y > pecho) return;
+    const s = sector(x, z);
+    bastaPorSector[s] = Math.min(bastaPorSector[s]!, y);
+  };
+  const medir = () => {
+    bastaPorSector.fill(Infinity);
+    posiciones.forEach((p, parte) => {
+      const indices = base.indices[parte]?.array ?? [];
+      for (let t = 0; t < indices.length; t += 3) {
+        const a = indices[t]! * 3;
+        const b = indices[t + 1]! * 3;
+        const c = indices[t + 2]! * 3;
+        if (Math.min(p[a + 1]!, p[b + 1]!, p[c + 1]!) <= pecho) recorrerTriangulo(p, a, b, c, marcarBasta);
+      }
+    });
+    bastaMasBaja = Math.min(...bastaPorSector);
+  };
+  medir();
+  const cubre = (x: number, y: number, z: number) => {
     // Con los vecinos se toma la más alta: es preferible ocultar un poco menos que dejar un hueco.
     const s = sector(x, z);
     let basta = -Infinity;
@@ -508,9 +963,11 @@ function ajustarArriba(
       const valor = bastaPorSector[(s + d + sectores) % sectores]!;
       basta = Math.max(basta, Number.isFinite(valor) ? valor : bastaMasBaja);
     }
-    // Margen: la basta puede tener un doblez hacia adentro que la hace parecer más baja.
-    return y > basta + 0.04;
+    // Margen chico: la basta ya se mide en la tela, y con más la piel de un abdomen grande asomaba
+    // rota justo sobre ella.
+    return y > basta + 0.015;
   };
+  return { cubre, tronco, medir };
 }
 
 /**
@@ -548,29 +1005,31 @@ function centroDelTronco(posiciones: Float32Array[], pecho: number): number {
  * el torso y el brazo. En un cuerpo de mucho peso el brazo queda pegado al torso, y los costados
  * de la prenda se confundían con mangas: quedaban a medio ensanchar, como alas.
  *
- * Donde hay espacio entre el torso y el brazo, el límite va al medio de ese espacio; más arriba,
- * cerca de la axila, se usa un ancho fijo.
+ * Cerca de la axila el límite es una línea que sigue el brazo: ahí el torso y el brazo se tocan, y
+ * medir solo la distancia al centro marcaba el puño como tronco. Más abajo el límite es el medio
+ * del espacio entre ambos, que además deja fuera el antebrazo y la mano.
  */
-function separarTronco(prenda: Float32Array[], cuerpo: Float32Array, ajuste: AjustePrenda, pechoCuerpo: number): { tronco: Float32Array[]; brazos: Uint8Array } {
+function separarTronco(prenda: Float32Array[], cuerpo: Float32Array, ajuste: AjustePrenda): { tronco: Float32Array[]; brazos: Uint8Array } {
   const { axila } = alturasDelTronco(prenda, ajuste);
-  const semiancho = (pechoCuerpo + Math.max(ajuste.holgura, 2)) / 100 / 5.47;
-  const limiteTronco = separacionTronco(cuerpo, axila);
+  const { sobreElBrazo, espacio } = lineaDelBrazo(cuerpo, axila);
   const tronco = prenda.map((p) => {
     const pesos = new Float32Array(p.length / 3);
     for (let i = 0; i < p.length; i += 3) {
       const x = Math.abs(p[i]!);
-      const limite = limiteTronco(p[i + 1]!);
-      pesos[i / 3] =
-        limite === null
-          ? Math.min(Math.max((semiancho * 1.25 - x) / (semiancho * 0.25), 0), 1)
-          : Math.min(Math.max((limite + TRANSICION_MANGA / 2 - x) / TRANSICION_MANGA, 0), 1);
+      const y = p[i + 1]!;
+      const limite = espacio(y);
+      const pesoLinea = 0.5 - (sobreElBrazo(x, y) + HOLGURA_MANGA) / TRANSICION_MANGA;
+      const pesoEspacio = limite === null ? 1 : 0.5 + (limite - x) / TRANSICION_MANGA;
+      pesos[i / 3] = Math.min(Math.max(Math.min(pesoLinea, pesoEspacio), 0), 1);
     }
     return pesos;
   });
   const brazos = new Uint8Array(cuerpo.length / 3);
   for (let i = 0; i < cuerpo.length; i += 3) {
-    const limite = cuerpo[i + 1]! < axila ? limiteTronco(cuerpo[i + 1]!) : null;
-    brazos[i / 3] = limite !== null && Math.abs(cuerpo[i]!) > limite ? 1 : 0;
+    const x = Math.abs(cuerpo[i]!);
+    const y = cuerpo[i + 1]!;
+    const limite = y < axila ? espacio(y) : null;
+    brazos[i / 3] = sobreElBrazo(x, y) > 0 || (limite !== null && x > limite) ? 1 : 0;
   }
   return { tronco, brazos };
 }
@@ -634,43 +1093,71 @@ const MEDIO_TORSO_MINIMO = 0.08;
 const FRANJA_BRAZO = 0.04;
 /** Ancho de la transición entre tronco y manga en el límite, en metros. */
 const TRANSICION_MANGA = 0.01;
+/** Cuánto cuelga la manga bajo la línea del brazo, en metros. */
+const HOLGURA_MANGA = 0.015;
 
 /**
- * Distancia al centro que separa el torso de los brazos a cada altura bajo la axila: la mitad del
- * espacio que el cuerpo deja entre ambos. `null` donde no hay espacio (cerca de la axila).
+ * Lo que separa el brazo del torso: `sobreElBrazo` es la distancia con signo a la línea que va del
+ * punto más alto del espacio entre ambos a la punta de la mano (positiva sobre el brazo), y
+ * `espacio` la mitad de ese espacio a cada altura, `null` donde no lo hay (cerca de la axila).
  *
  * Se usa con el cuerpo promedio (ver `separarTronco`): en un abdomen grande la malla se estira y
  * sus vértices quedan más separados que el espacio buscado.
  */
-function separacionTronco(cuerpo: Float32Array, axila: number): (y: number) => number | null {
+function lineaDelBrazo(cuerpo: Float32Array, axila: number): { sobreElBrazo: (x: number, y: number) => number; espacio: (y: number) => number | null } {
   const porFranja = new Map<number, number[]>();
+  let manoX = 0;
+  let manoY = 0;
   for (let i = 0; i < cuerpo.length; i += 3) {
+    const x = Math.abs(cuerpo[i]!);
     const y = cuerpo[i + 1]!;
+    if (x > manoX) {
+      manoX = x;
+      manoY = y;
+    }
     if (y > axila) continue;
     const f = Math.floor(y / FRANJA_BRAZO);
     let lista = porFranja.get(f);
     if (!lista) porFranja.set(f, (lista = []));
-    lista.push(Math.abs(cuerpo[i]!));
+    lista.push(x);
   }
   const limites = new Map<number, number>();
+  let inicioX = 0;
+  let inicioY = -Infinity;
   for (const [f, lista] of porFranja) {
     lista.sort((a, b) => a - b);
     for (let k = 1; k < lista.length; k++) {
       if (lista[k - 1]! >= MEDIO_TORSO_MINIMO && lista[k]! - lista[k - 1]! > ESPACIO_BRAZO) {
-        limites.set(f, (lista[k]! + lista[k - 1]!) / 2);
+        const limite = (lista[k]! + lista[k - 1]!) / 2;
+        limites.set(f, limite);
+        if ((f + 0.5) * FRANJA_BRAZO > inicioY) {
+          inicioX = limite;
+          inicioY = (f + 0.5) * FRANJA_BRAZO;
+        }
         break;
       }
     }
   }
-  // Con las franjas vecinas, el límite más afuera: así no hay saltos entre una altura y otra.
-  return (y) => {
-    const f = Math.floor(y / FRANJA_BRAZO);
-    let limite: number | null = null;
-    for (const df of [-1, 0, 1]) {
-      const valor = limites.get(f + df);
-      if (valor !== undefined) limite = Math.max(limite ?? 0, valor);
-    }
-    return limite;
+  const largo = Math.hypot(manoX - inicioX, manoY - inicioY);
+  const nx = (inicioY - manoY) / largo;
+  const ny = (manoX - inicioX) / largo;
+  return {
+    sobreElBrazo: (x, y) => {
+      const ax = Math.abs(x);
+      const d = (ax - inicioX) * nx + (y - inicioY) * ny;
+      // Hacia el centro del cuerpo no hay brazo, aunque quede sobre la línea.
+      return ax < inicioX ? Math.min(d, ax - inicioX) : d;
+    },
+    // Con las franjas vecinas, el límite más afuera: así no hay saltos entre una altura y otra.
+    espacio: (y) => {
+      const f = Math.floor(y / FRANJA_BRAZO);
+      let limite: number | null = null;
+      for (const df of [-1, 0, 1]) {
+        const valor = limites.get(f + df);
+        if (valor !== undefined) limite = Math.max(limite ?? 0, valor);
+      }
+      return limite;
+    },
   };
 }
 
@@ -808,7 +1295,8 @@ function ajustarAbajo(
   calibrada: PrendaCalibrada,
   cuerpo: MedidasCuerpo,
   talla: TallaPrenda,
-): (x: number, y: number, z: number) => boolean {
+  indices: (THREE.BufferAttribute | null)[],
+): { cubre: (x: number, y: number, z: number) => boolean; medir: () => void } {
   const { ajuste } = calibrada;
   let abajo = Infinity;
   let arriba = -Infinity;
@@ -847,12 +1335,28 @@ function ajustarAbajo(
   const sectores = 48;
   const pretinaPorSector = new Float32Array(sectores).fill(-Infinity);
   const sector = (x: number, z: number) => Math.floor((Math.atan2(x, z - centroZ) / (2 * Math.PI) + 0.5) * sectores) % sectores;
-  cadaVertice(posiciones, (p, i) => {
-    if (p[i + 1]! < cadera) return;
-    const s = sector(p[i]!, p[i + 2]!);
-    pretinaPorSector[s] = Math.max(pretinaPorSector[s]!, p[i + 1]!);
-  });
-  return (x, y, z) => {
+  // Sobre la superficie de la tela: a un sector podían no tocarle vértices de la pretina, se creía
+  // más baja de lo que es y por ahí la piel de la cadera asomaba como un punto en el pantalón.
+  const marcarPretina = (x: number, y: number, z: number) => {
+    if (y < cadera) return;
+    const s = sector(x, z);
+    pretinaPorSector[s] = Math.max(pretinaPorSector[s]!, y);
+  };
+  // Con la tela ya en su lugar, como la basta de las prendas de arriba.
+  const medir = () => {
+    pretinaPorSector.fill(-Infinity);
+    posiciones.forEach((p, parte) => {
+      const lista = indices[parte]?.array ?? [];
+      for (let t = 0; t < lista.length; t += 3) {
+        const a = lista[t]! * 3;
+        const b = lista[t + 1]! * 3;
+        const c = lista[t + 2]! * 3;
+        if (Math.max(p[a + 1]!, p[b + 1]!, p[c + 1]!) >= cadera) recorrerTriangulo(p, a, b, c, marcarPretina);
+      }
+    });
+  };
+  medir();
+  const cubre = (x: number, y: number, z: number) => {
     if (y < abajo + 0.04) return false;
     // Con los vecinos se toma la más baja: es preferible ocultar un poco menos que dejar un hueco.
     const s = sector(x, z);
@@ -863,35 +1367,76 @@ function ajustarAbajo(
     }
     return y < pretina - 0.02;
   };
+  return { cubre, medir };
+}
+
+/** Cuánto arriba y abajo del cinturón se mide el cuerpo, en metros. */
+const ALTO_CINTURON = 0.03;
+
+/** Vértices de los brazos del cuerpo, los mismos para cualquier medida. */
+function brazosDelCuerpo(modelo: ModeloReal): Uint8Array {
+  const cuerpo = modelo.cuerpo.base;
+  let arriba = -Infinity;
+  for (let i = 1; i < cuerpo.length; i += 3) arriba = Math.max(arriba, cuerpo[i]!);
+  const { sobreElBrazo, espacio } = lineaDelBrazo(cuerpo, arriba * 0.8);
+  const brazos = new Uint8Array(cuerpo.length / 3);
+  for (let i = 0; i < cuerpo.length; i += 3) {
+    const x = Math.abs(cuerpo[i]!);
+    const y = cuerpo[i + 1]!;
+    const limite = espacio(y);
+    brazos[i / 3] = sobreElBrazo(x, y) > 0 || (limite !== null && x > limite) ? 1 : 0;
+  }
+  return brazos;
+}
+
+/** Altura media del borde de arriba de un pantalón, alrededor del cuerpo. */
+function alturaDePretina(pantalon?: THREE.Group): number | null {
+  if (!pantalon) return null;
+  const sectores = 24;
+  const bordes = new Float32Array(sectores).fill(-Infinity);
+  pantalon.traverse((hijo) => {
+    if (!(hijo instanceof THREE.Mesh)) return;
+    const p = hijo.geometry.getAttribute('position').array;
+    for (let i = 0; i < p.length; i += 3) {
+      const s = Math.floor((Math.atan2(p[i]!, p[i + 2]!) / (2 * Math.PI) + 0.5) * sectores) % sectores;
+      bordes[s] = Math.max(bordes[s]!, p[i + 1]!);
+    }
+  });
+  const medidos = bordes.filter(Number.isFinite);
+  return medidos.length ? medidos.reduce((a, b) => a + b, 0) / medidos.length : null;
 }
 
 /**
  * Cinturón armado sobre el cuerpo deformado: una correa que sigue el contorno de la cadera, con
  * hebilla y tachas metálicas.
  */
-export function crearCinturonReal(posiciones: Float32Array, cuerpo: MedidasCuerpo, color: string): THREE.Group {
+export function crearCinturonReal(modelo: ModeloReal, posiciones: Float32Array, cuerpo: MedidasCuerpo, color: string, pantalon?: THREE.Group): THREE.Group {
   const h = cuerpo.altura / 100;
-  const y = 0.575 * h;
+  // A la altura de la pretina: en un cuerpo de mucho peso el pantalón queda bajo el abdomen.
+  const y = Math.min(0.575 * h, alturaDePretina(pantalon) ?? Infinity);
   const ancho = 0.035;
+  // Lo que es brazo se decide en el cuerpo promedio (ver `separarTronco`): con el peso, el brazo
+  // queda pegado al abdomen y no se distingue por su distancia al centro.
+  const brazos = brazosDelCuerpo(modelo);
+  const cerca = (i: number) => Math.abs(posiciones[i + 1]! - y) < ALTO_CINTURON && !brazos[i / 3];
   // Radio del cuerpo en cada dirección a la altura del cinturón, sin manos ni brazos.
   const sectores = 64;
   const radios = new Float32Array(sectores);
   let centroZ = 0;
   let cuenta = 0;
   for (let i = 0; i < posiciones.length; i += 3) {
-    if (Math.abs(posiciones[i + 1]! - y) < 0.015 && Math.abs(posiciones[i]!) < 0.25 * h) {
+    if (cerca(i)) {
       centroZ += posiciones[i + 2]!;
       cuenta++;
     }
   }
   centroZ /= cuenta || 1;
   for (let i = 0; i < posiciones.length; i += 3) {
+    if (!cerca(i)) continue;
     const x = posiciones[i]!;
     const z = posiciones[i + 2]! - centroZ;
-    const r = Math.hypot(x, z);
-    if (Math.abs(posiciones[i + 1]! - y) > 0.015 || r > 0.2 * h) continue;
     const s = Math.floor((Math.atan2(x, z) / (2 * Math.PI) + 0.5) * sectores) % sectores;
-    radios[s] = Math.max(radios[s]!, r);
+    radios[s] = Math.max(radios[s]!, Math.hypot(x, z));
   }
   // Sectores sin vértices toman el de sus vecinos, y el contorno se suaviza.
   for (let s = 0; s < sectores; s++) if (!radios[s]) radios[s] = radios[(s + 1) % sectores] || radios[(s - 1 + sectores) % sectores] || 0.15 * h;
