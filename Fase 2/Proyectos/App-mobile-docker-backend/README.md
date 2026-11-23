@@ -36,7 +36,7 @@ Al arrancar, el backend crea las tablas y, si la base está vacía, carga datos 
 | `gerente@rockstar.cl` | `gerente123` | Gerente. En la tienda define el precio de los productos |
 | `cliente@rockstar.cl` | `cliente123` | Cliente. Compra en la tienda; también se puede crear una cuenta nueva |
 
-**Catálogo de bandas.** Con el sistema arriba, este comando carga las fotos de 17 bandas y 19 productos de muestra de bandas conocidas. Se puede repetir: no duplica nada.
+**Catálogo de bandas.** Con el sistema arriba, este comando carga las fotos de 19 bandas, 21 productos de muestra de bandas conocidas y el próximo concierto en Chile de las que lo tienen anunciado. Se puede repetir: no duplica nada.
 
 ```
 cd services/api

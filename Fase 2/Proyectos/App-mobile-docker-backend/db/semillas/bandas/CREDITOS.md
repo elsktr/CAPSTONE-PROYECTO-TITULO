@@ -24,6 +24,8 @@ Son fotos reales de cada banda, tomadas de Wikimedia Commons en su versión de 5
 | `fotos/pantera.jpg` | [Pantera 1987-2003 lineup](https://commons.wikimedia.org/wiki/File:Pantera_1987-2003_lineup.jpg) | April Ashford-Forsythe, Llann Wé² y otros; ver la página de la obra | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0) |
 | `fotos/queen.jpg` | [Queen A Night At The Opera (1975 Elektra publicity photo 02)](https://commons.wikimedia.org/wiki/File:Queen_A_Night_At_The_Opera_(1975_Elektra_publicity_photo_02).jpg) | Koh Hasebe, distribuida por Elektra Records | Dominio público |
 | `fotos/ramones.jpg` | [Ramones rocket to russia photo](https://commons.wikimedia.org/wiki/File:Ramones_rocket_to_russia_photo.jpg) | Danny Fields | Dominio público |
+| `fotos/slipknot.jpg` | [Slipknot performing in November 2005](https://commons.wikimedia.org/wiki/File:Slipknot_performing_in_November_2005.jpg) | Gene Smirnov | [CC BY-SA 2.0](https://creativecommons.org/licenses/by-sa/2.0) |
+| `fotos/marilyn-manson.jpg` | [Marilyn Manson live in Lisbon, 2025](https://commons.wikimedia.org/wiki/File:Marilyn_Manson_live_in_Lisbon,_2025.jpg) | Mind Booster Noori | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | `fotos/slayer.jpg` | [Slayer, The Fields of Rock, 2007](https://commons.wikimedia.org/wiki/File:Slayer,_The_Fields_of_Rock,_2007.jpg) | Francis, Groningen | [CC BY 2.0](https://creativecommons.org/licenses/by/2.0) |
 
 La licencia cubre la foto, no el nombre ni la imagen de la banda: los nombres de las bandas son marcas de sus dueños.

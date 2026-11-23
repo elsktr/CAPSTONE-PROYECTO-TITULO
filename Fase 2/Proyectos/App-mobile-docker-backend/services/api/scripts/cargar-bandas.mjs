@@ -87,14 +87,27 @@ for (const banda of catalogo.bandas) {
   fotos++;
 }
 
+// --- Próximos conciertos en Chile ---
+
+// Solo se registra en las bandas que aún no tienen uno: el que haya puesto el Gerente se respeta.
+let conciertos = 0;
+for (const banda of catalogo.bandas) {
+  if (!banda.concierto || conFoto.get(clave(banda.nombre))?.concierto) {
+    continue;
+  }
+  await llamar('PUT', '/inventario/bandas/concierto', { banda: banda.nombre, fecha: banda.concierto.fecha, lugar: banda.concierto.lugar ?? null }, bodega);
+  conciertos++;
+}
+
 // --- Productos, con su precio y descripción ---
 
 const creadas = await crearVariantes(catalogo.productos, { prefijo: 'semilla-bandas', ilustracion }, bodega);
 const conPrecio = await ponerPrecios(catalogo.productos, bodega, gerente);
 
 console.log(`Fotos de bandas guardadas: ${fotos} de ${catalogo.bandas.length}`);
+console.log(`Conciertos registrados: ${conciertos}`);
 console.log(`Variantes creadas: ${creadas} de ${catalogo.productos.reduce((n, p) => n + Object.keys(p.tallas).length, 0)}`);
 console.log(`Productos que recibieron precio: ${conPrecio} de ${catalogo.productos.length}`);
-if (fotos + creadas + conPrecio === 0) {
+if (fotos + conciertos + creadas + conPrecio === 0) {
   console.log('Todo estaba cargado: no hubo cambios.');
 }

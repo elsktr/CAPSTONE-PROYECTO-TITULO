@@ -16,7 +16,9 @@
     { "nombre": "Pantera", "foto": "fotos/pantera.jpg", "credito": "Fotos: April Ashford-Forsythe, Llann Wé² y otros · CC BY-SA 3.0 · Wikimedia Commons" },
     { "nombre": "Queen", "foto": "fotos/queen.jpg", "credito": "Foto: Koh Hasebe, Elektra Records · dominio público · Wikimedia Commons" },
     { "nombre": "Ramones", "foto": "fotos/ramones.jpg", "credito": "Foto: Danny Fields · dominio público · Wikimedia Commons" },
-    { "nombre": "Slayer", "foto": "fotos/slayer.jpg", "credito": "Foto: Francis, Groningen · CC BY 2.0 · Wikimedia Commons" }
+    { "nombre": "Slayer", "foto": "fotos/slayer.jpg", "credito": "Foto: Francis, Groningen · CC BY 2.0 · Wikimedia Commons" },
+    { "nombre": "Slipknot", "foto": "fotos/slipknot.jpg", "credito": "Foto: Gene Smirnov · CC BY-SA 2.0 · Wikimedia Commons", "concierto": { "fecha": "2027-09-12", "lugar": "Estadio Nacional, Santiago" } },
+    { "nombre": "Marilyn Manson", "foto": "fotos/marilyn-manson.jpg", "credito": "Foto: Mind Booster Noori · CC0 · Wikimedia Commons", "concierto": { "fecha": "2027-09-12", "lugar": "Estadio Nacional, Santiago" } }
   ],
   "productos": [
     { "nombre": "Polera Metallica Master of Puppets", "categoria": "Poleras", "banda": "Metallica", "titulo": "Master of Puppets", "color": "Negro", "tallas": { "M": 8, "L": 6 }, "precio": 16990, "descripcion": "Polera negra de algodón con el arte de Master of Puppets, el disco de 1986 de Metallica." },
@@ -34,6 +36,8 @@
     { "nombre": "Polera Motörhead Ace of Spades", "categoria": "Poleras", "banda": "Motörhead", "titulo": "Ace of Spades", "color": "Negro", "tallas": { "M": 5, "L": 6 }, "precio": 15990, "descripcion": "Polera negra de algodón de Ace of Spades, el disco de 1980 de Motörhead." },
     { "nombre": "Polera Kiss Destroyer", "categoria": "Poleras", "banda": "Kiss", "titulo": "Destroyer", "color": "Negro", "tallas": { "M": 5, "L": 5 }, "precio": 15990, "descripcion": "Polera negra de algodón de Destroyer, el disco de 1976 de Kiss." },
     { "nombre": "Polera Judas Priest British Steel", "categoria": "Poleras", "banda": "Judas Priest", "titulo": "British Steel", "color": "Negro", "tallas": { "M": 4, "L": 5 }, "precio": 15990, "descripcion": "Polera negra de algodón con la hoja de afeitar de British Steel, de Judas Priest." },
+    { "nombre": "Polera Slipknot Iowa", "categoria": "Poleras", "banda": "Slipknot", "titulo": "Iowa", "color": "Negro", "tallas": { "M": 6, "L": 6 }, "precio": 16990, "descripcion": "Polera negra de algodón con la cabra de Iowa, el disco de 2001 de Slipknot." },
+    { "nombre": "Polera Marilyn Manson Antichrist Superstar", "categoria": "Poleras", "banda": "Marilyn Manson", "titulo": "Antichrist Superstar", "color": "Negro", "tallas": { "M": 5, "L": 5 }, "precio": 16990, "descripcion": "Polera negra de algodón de Antichrist Superstar, el disco de 1996 de Marilyn Manson." },
     { "nombre": "Polerón Metallica Ride the Lightning", "categoria": "Polerones", "banda": "Metallica", "titulo": "Ride the Lightning", "color": "Negro", "tallas": { "L": 4, "XL": 3 }, "precio": 36990, "descripcion": "Polerón negro con capucha y el arte de Ride the Lightning, de Metallica." },
     { "nombre": "Polerón Iron Maiden Powerslave", "categoria": "Polerones", "banda": "Iron Maiden", "titulo": "Powerslave", "color": "Negro", "tallas": { "L": 4, "XL": 3 }, "precio": 36990, "descripcion": "Polerón negro con capucha y el arte de Powerslave, de Iron Maiden." },
     { "nombre": "Polerón AC/DC Highway to Hell", "categoria": "Polerones", "banda": "AC/DC", "titulo": "Highway to Hell", "color": "Negro", "tallas": { "L": 4, "XL": 4 }, "precio": 34990, "descripcion": "Polerón negro con capucha de Highway to Hell, el disco de 1979 de AC/DC." },
