@@ -373,6 +373,23 @@ describe('destinos y flete', () => {
       cuerpo: { codigo: 'DATOS_INVALIDOS', mensaje: 'La comuna no existe.' },
     });
   });
+
+  it('cotiza por separado dos carritos de distinto peso a la misma comuna', async () => {
+    const [producto] = await filas<{ id_producto: number }>('SELECT id_producto FROM inventario.variantes WHERE id_variante = $1', [EDDIE]);
+    await db.query('UPDATE inventario.productos SET peso_gramos = 1200, alto_cm = 20, ancho_cm = 20, largo_cm = 20 WHERE id_producto = $1', [producto!.id_producto]);
+    try {
+      const lineas = (cantidad: number) => [{ idVariante: EDDIE, cantidad }];
+      const uno = await enviar<CotizacionFlete>('/logistica/fletes/cotizar', { idComuna: providencia, lineas: lineas(1) });
+      const dos = await enviar<CotizacionFlete>('/logistica/fletes/cotizar', { idComuna: providencia, lineas: lineas(2) });
+
+      // 1,2 kg y 8.000 cm³ -> tramos 2 y 2; 2,4 kg y 16.000 cm³ -> tramos 3 y 4.
+      expect(uno.cuerpo).toEqual({ idComuna: providencia, valor: 3990 + 500 + 300, disponible: true });
+      expect(dos.cuerpo).toEqual({ idComuna: providencia, valor: 3990 + 2 * 500 + 3 * 300, disponible: true });
+    } finally {
+      await db.query('UPDATE inventario.productos SET peso_gramos = NULL, alto_cm = NULL, ancho_cm = NULL, largo_cm = NULL WHERE id_producto = $1', [producto!.id_producto]);
+      await db.query('DELETE FROM logistica.tarifas_cache WHERE id_comuna = $1', [providencia]);
+    }
+  });
 });
 
 describe('compra web', () => {
@@ -602,6 +619,24 @@ describe('compra web', () => {
     expect((await enCatalogo(RAYO))!.disponible).toBe(0);
     await pagar((respuestas.find((r) => r.status === 201)!.cuerpo as CheckoutResponse).tokenPago, false);
     expect((await enCatalogo(RAYO))!.disponible).toBe(disponible);
+  });
+
+  it('el checkout cobra el flete del carrito y no lo cambia si después varía la tarifa', async () => {
+    const [producto] = await filas<{ id_producto: number }>('SELECT id_producto FROM inventario.variantes WHERE id_variante = $1', [EDDIE]);
+    await db.query('UPDATE inventario.productos SET peso_gramos = 1200, alto_cm = 20, ancho_cm = 20, largo_cm = 20 WHERE id_producto = $1', [producto!.id_producto]);
+    try {
+      const { cuerpo } = await comprar([{ idVariante: EDDIE, cantidad: 2 }]);
+      expect(cuerpo.flete).toBe(3990 + 2 * 500 + 3 * 300);
+
+      await db.query('UPDATE logistica.tarifas_cache SET valor = 9999 WHERE id_comuna = $1', [providencia]);
+      await pagar(cuerpo.tokenPago, false);
+      expect(await filas('SELECT flete_cobrado FROM ventas.costos_venta WHERE id_venta = $1', [cuerpo.idVenta])).toEqual([
+        { flete_cobrado: cuerpo.flete },
+      ]);
+    } finally {
+      await db.query('UPDATE inventario.productos SET peso_gramos = NULL, alto_cm = NULL, ancho_cm = NULL, largo_cm = NULL WHERE id_producto = $1', [producto!.id_producto]);
+      await db.query('DELETE FROM logistica.tarifas_cache WHERE id_comuna = $1', [providencia]);
+    }
   });
 });
 

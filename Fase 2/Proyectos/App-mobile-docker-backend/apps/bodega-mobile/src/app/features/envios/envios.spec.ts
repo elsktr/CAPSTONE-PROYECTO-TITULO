@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import type { Pedido } from '@rockstar/contracts';
 
 import { EntornoDePrueba, configurarEntorno } from '../../testing/entorno';
+import { ServidorService } from '../../core/api/servidor.service';
 import { InicioPage } from '../inicio/inicio.page';
 import { agruparEnvios, esUrgente, etiquetaDeEstado, grupoDeEnvio, haceCuanto, momentoDelPedido } from './envios';
 import { EnviosPage } from './envios.page';
@@ -125,6 +126,26 @@ describe('envíos', () => {
       await pagina.cargar();
       expect(pagina.error()).toBeNull();
       expect(pagina.visibles()).toHaveLength(3);
+    });
+
+    it('muestra el aviso de demostración solo mientras el servidor sea de prueba', () => {
+      const pagina = crear(EnviosPage);
+      expect(pagina.mostrarAvisoDemo()).toBe(true);
+
+      TestBed.inject(ServidorService).modoDemo.set(false);
+      expect(pagina.mostrarAvisoDemo()).toBe(false);
+    });
+
+    it('al cambiar de modo, recarga la lista sin pedidos del modo anterior', async () => {
+      const pagina = crear(EnviosPage);
+      await pagina.cargar();
+      expect(pagina.visibles().length).toBeGreaterThan(0);
+
+      TestBed.inject(ServidorService).modoDemo.set(false);
+      entorno.red.caida = true;
+      await pagina.cargar();
+      expect(pagina.error()).toContain('No hay conexión');
+      expect(pagina.visibles()).toEqual([]);
     });
 
     it('genera el despacho de un pedido por enviar y lo deja en camino con su código de seguimiento', async () => {

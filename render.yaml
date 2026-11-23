@@ -6,6 +6,7 @@
 #   rockstar-api     backend en NestJS
 #   rockstar-tienda  e-commerce: compras con Webpay de prueba (tarjetas de prueba, sin dinero)
 #   rockstar-bodega  app de bodega en el navegador
+#   rockstar-pos     punto de venta de la tienda física en el navegador
 #
 # Render no despliega solo al recibir un push: lo pide el pipeline de GitHub Actions
 # (`.github/workflows/ci.yml`) cuando pasan todas las pruebas.
@@ -90,5 +91,25 @@ services:
     envVars:
       - key: PORT
         value: "80"
+      - key: API_URL
+        sync: false
+
+  # El POS vive fuera del backend (Fase 2/Proyectos/PosRockStarStore) y tiene sus propias
+  # dependencias, por eso su contexto de construcción es su carpeta. Sin máquina de cobro en
+  # la nube: en la web de prueba se cobra en efectivo, transferencia o con la máquina simulada
+  # corriendo en el equipo de quien prueba (Ajustes de la máquina).
+  - type: web
+    name: rockstar-pos
+    runtime: docker
+    plan: free
+    region: virginia
+    dockerContext: "./Fase 2/Proyectos/PosRockStarStore"
+    dockerfilePath: "./Fase 2/Proyectos/PosRockStarStore/Dockerfile"
+    healthCheckPath: /
+    autoDeployTrigger: "off"
+    envVars:
+      - key: PORT
+        value: "80"
+      # Dirección pública de rockstar-api, sin `/` al final (https://rockstar-api.onrender.com).
       - key: API_URL
         sync: false

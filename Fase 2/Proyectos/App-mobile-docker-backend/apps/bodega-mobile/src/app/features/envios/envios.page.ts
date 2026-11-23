@@ -20,6 +20,7 @@ import { cubeOutline, locationOutline, timeOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 
 import { codigoDeError, mensajeDeError } from '../../core/api/errores';
+import { ServidorService } from '../../core/api/servidor.service';
 import { AvisosService } from '../../shared/avisos.service';
 import { valorDeEvento } from '../../shared/formato';
 import {
@@ -73,6 +74,11 @@ import { LogisticaApi } from './logistica.api';
       </ion-toolbar>
     </ion-header>
     <ion-content>
+      @if (mostrarAvisoDemo()) {
+        <ion-text color="warning" role="status" class="aviso-demo">
+          <p>Los pedidos que ves son de ejemplo: no provienen de la tienda.</p>
+        </ion-text>
+      }
       @if (error(); as mensaje) {
         <div class="rs-acciones">
           <ion-text color="danger">
@@ -232,6 +238,12 @@ import { LogisticaApi } from './logistica.api';
       font-size: 0.9rem;
       line-height: 1.4;
     }
+    .aviso-demo {
+      display: block;
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
     .pregunta {
       color: var(--rs-tenue);
     }
@@ -248,8 +260,11 @@ import { LogisticaApi } from './logistica.api';
 export class EnviosPage {
   private readonly api = inject(LogisticaApi);
   private readonly avisos = inject(AvisosService);
+  private readonly servidor = inject(ServidorService);
 
   private readonly pedidos = signal<Pedido[]>([]);
+  /** El modo de conexión en que se trajo la última lista de pedidos. */
+  private ultimoModo: boolean | null = null;
   readonly grupo = signal<GrupoDeEnvio>('POR_ENVIAR');
   readonly cargando = signal(false);
   readonly error = signal<string | null>(null);
@@ -263,6 +278,8 @@ export class EnviosPage {
 
   readonly envios = computed(() => agruparEnvios(this.pedidos()));
   readonly visibles = computed(() => this.envios()[this.grupo()]);
+  /** Muestra el aviso de que la lista son pedidos de ejemplo, mientras el servidor sea de prueba. */
+  readonly mostrarAvisoDemo = computed(() => this.servidor.modoDemo());
   /** Mientras se genera un despacho no se inicia otro. */
   readonly ocupado = computed(() => this.despachando() !== null);
 
@@ -287,6 +304,12 @@ export class EnviosPage {
   }
 
   async cargar(): Promise<void> {
+    const modoDemo = this.servidor.modoDemo();
+    if (this.ultimoModo !== null && this.ultimoModo !== modoDemo) {
+      // Al cambiar de modo no se conservan los pedidos del modo anterior: la lista se recarga.
+      this.pedidos.set([]);
+    }
+    this.ultimoModo = modoDemo;
     this.cargando.set(true);
     this.error.set(null);
     try {

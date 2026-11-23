@@ -27,6 +27,9 @@ jobs:
       - name: Instalar
         working-directory: ${{ env.BACKEND }}
         run: npm ci
+      - name: Tipos (incluye las pruebas)
+        working-directory: ${{ env.BACKEND }}/services/api
+        run: npm run typecheck
       - name: Pruebas unitarias
         working-directory: ${{ env.BACKEND }}/services/api
         run: npm test
@@ -48,6 +51,10 @@ jobs:
       - name: Pruebas
         working-directory: ${{ env.BACKEND }}/apps/bodega-mobile
         run: npm test
+      # La misma compilación que hace su Dockerfile en Render: si falla aquí, no se despliega.
+      - name: Compilación
+        working-directory: ${{ env.BACKEND }}
+        run: npm run build --workspace=bodega-mobile -- --configuration docker
 
   tienda:
     name: Tienda web
@@ -63,6 +70,10 @@ jobs:
       - name: Pruebas
         working-directory: ${{ env.BACKEND }}/apps/e-commerce
         run: npm test
+      # La misma compilación que hace su Dockerfile en Render: si falla aquí, no se despliega.
+      - name: Compilación
+        working-directory: ${{ env.BACKEND }}/apps/e-commerce
+        run: npm run build
 
   pos:
     name: POS
@@ -78,6 +89,10 @@ jobs:
       - name: Pruebas unitarias
         working-directory: ${{ env.POS }}
         run: npx vitest run
+      # La misma compilación que hace su Dockerfile en Render (tipos con tsc y luego Vite).
+      - name: Compilación
+        working-directory: ${{ env.POS }}
+        run: npm run build
       - name: Pruebas de la máquina de cobro
         working-directory: ${{ env.POS }}
         run: npm run test.terminal
@@ -104,6 +119,7 @@ jobs:
       HOOK_API: ${{ secrets.RENDER_HOOK_API }}
       HOOK_TIENDA: ${{ secrets.RENDER_HOOK_TIENDA }}
       HOOK_BODEGA: ${{ secrets.RENDER_HOOK_BODEGA }}
+      HOOK_POS: ${{ secrets.RENDER_HOOK_POS }}
       URL_TIENDA: ${{ vars.RENDER_URL_TIENDA }}
     steps:
       - name: Pedir el despliegue a Render
@@ -113,8 +129,15 @@ jobs:
             echo "::warning::Faltan los secretos RENDER_HOOK_API, RENDER_HOOK_TIENDA o RENDER_HOOK_BODEGA: no se despliega."
             exit 0
           fi
+          hooks=("$HOOK_API" "$HOOK_TIENDA" "$HOOK_BODEGA")
+          # El POS se agregó después: si su secreto aún no está, se despliega el resto igual.
+          if [ -n "$HOOK_POS" ]; then
+            hooks+=("$HOOK_POS")
+          else
+            echo "::warning::Falta el secreto RENDER_HOOK_POS: el POS no se despliega."
+          fi
           # `ref` despliega exactamente el commit que pasó las pruebas.
-          for hook in "$HOOK_API" "$HOOK_TIENDA" "$HOOK_BODEGA"; do
+          for hook in "${hooks[@]}"; do
             curl --fail --silent --show-error --request POST "${hook}&ref=${GITHUB_SHA}" --output /dev/null
           done
           echo "pedido=true" >> "$GITHUB_OUTPUT"

@@ -83,7 +83,23 @@ Escribe directo en PostgreSQL (`DATABASE_URL`, por defecto la base de `docker co
 
 Un producto creado desde la bodega no aparece en la tienda hasta que el Gerente le pone precio: en la tienda, "Acceso administrador", pestaña Bodega, botón Editar.
 
-La tienda cobra con **Webpay Plus** de Transbank (`services/api/src/pagos/pasarela.ts`). Con `docker compose` usa el ambiente de integración de Transbank: Webpay real, pero solo con tarjetas de prueba y sin dinero (VISA `4051 8856 0044 6623`, CVV `123`, RUT `11.111.111-1`, clave `123`). `WEBPAY_AMBIENTE` lo cambia a `simulada` (no sale a Transbank) o a `produccion` (con el código de comercio y la llave propios; ver `.env.example`). Los despachos siguen simulados: el código de seguimiento no existe en Starken, y el adaptador (`services/api/src/logistica/transportista.ts`) se reemplaza al tener credenciales. Con `STARKEN_AMBIENTE=desactivado` los envíos se apagan: la compra no cobra flete, la tienda avisa que los envíos por Starken llegan próximamente y los pedidos quedan pagados sin despacho.
+La tienda cobra con **Webpay Plus** de Transbank (`services/api/src/pagos/pasarela.ts`). Con `docker compose` usa el ambiente de integración de Transbank: Webpay real, pero solo con tarjetas de prueba y sin dinero (VISA `4051 8856 0044 6623`, CVV `123`, RUT `11.111.111-1`, clave `123`). `WEBPAY_AMBIENTE` lo cambia a `simulada` (no sale a Transbank) o a `produccion` (con el código de comercio y la llave propios; ver `.env.example`).
+
+### Envíos con Starken
+
+Los fletes, los despachos y el seguimiento pasan por un solo adaptador (`services/api/src/logistica/transportista.ts`). Por defecto `STARKEN_AMBIENTE=simulada`: no se llama a Starken, las cotizaciones dependen del destino y del peso y volumen del carrito, y los códigos de seguimiento (p. ej. `STK-901001`) son deterministas. Para usar la API REST, configurar `STARKEN_AMBIENTE=integracion` o `produccion` junto con `STARKEN_API_URL`, `STARKEN_USUARIO` y `STARKEN_CLAVE`; con la dirección o las credenciales incompletas la API no arranca. El resto del sistema no cambia: tienda, POS y bodega siguen usando los mismos contratos. `STARKEN_SYNC_INTERVAL_MS` controla cada cuánto se actualiza el seguimiento de los pedidos despachados. Con `STARKEN_AMBIENTE=desactivado` los envíos se apagan: la compra no cobra flete, la tienda avisa que los envíos por Starken llegan próximamente y los pedidos quedan pagados sin despacho.
+
+El estado de un envío se consulta por su código, con sesión de Cliente (solo el suyo) o de Vendedor, Bodega y Gerente (cualquiera):
+
+```
+TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/usuarios/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"bodega@rockstar.cl","password":"bodega123"}' | jq -r .accessToken)
+curl -s http://localhost:3000/api/v1/logistica/envios/STK-900104 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Responde `{ "codigo", "estado", "eventos": [{ "estado", "descripcion", "fecha" }], "actualizadoEn" }`. Un código que no existe responde 404 `NO_ENCONTRADO`; si Starken falla y ya hay estado guardado, se devuelve ese último estado.
 
 Otros comandos:
 
@@ -211,18 +227,18 @@ El APK es de depuración: sirve para instalarlo directamente, no para publicarlo
 
 ## Web de prueba en Render
 
-La tienda, la app de bodega y la API se publican en [Render](https://render.com) con el plan gratis, según `render.yaml` (en la raíz del repositorio). Cualquiera puede registrarse y comprar: el pago es Webpay en el ambiente de prueba de Transbank, con la tarjeta de prueba y sin dinero, y los envíos están apagados (`STARKEN_AMBIENTE=desactivado`).
+La tienda, la app de bodega, el POS y la API se publican en [Render](https://render.com) con el plan gratis, según `render.yaml` (en la raíz del repositorio). Cualquiera puede registrarse y comprar: el pago es Webpay en el ambiente de prueba de Transbank, con la tarjeta de prueba y sin dinero, y los envíos están apagados (`STARKEN_AMBIENTE=desactivado`).
 
-El pipeline de GitHub Actions (`.github/workflows/ci.yml`) corre todas las pruebas en cada push a `main`. Si pasan, le pide a Render que despliegue ese commit y espera hasta que la tienda responda con la versión nueva. Render no despliega por su cuenta.
+El pipeline de GitHub Actions (`.github/workflows/ci.yml`) corre todas las pruebas en cada push a `main` y compila la tienda, la app de bodega y el POS igual que sus Dockerfiles, para que un error de compilación aparezca antes de desplegar. Si todo pasa, le pide a Render que despliegue ese commit y espera hasta que la tienda responda con la versión nueva. Render no despliega por su cuenta.
 
 **Crearla, una sola vez:**
 
-1. En Render, **New → Blueprint**, conecta este repositorio de GitHub y acepta `render.yaml`. Crea la base y los tres servicios.
+1. En Render, **New → Blueprint**, conecta este repositorio de GitHub y acepta `render.yaml`. Crea la base y los cuatro servicios.
 2. Render pide los valores que no están en el archivo:
-   - `API_URL` de `rockstar-tienda` y de `rockstar-bodega`: `https://rockstar-api.onrender.com`, sin `/` al final.
+   - `API_URL` de `rockstar-tienda`, `rockstar-bodega` y `rockstar-pos`: `https://rockstar-api.onrender.com`, sin `/` al final.
    - `JWT_CLAVE_PRIVADA` y `JWT_CLAVE_PUBLICA` de `rockstar-api`: las dos líneas que imprime `npm run claves` en `services/api`, cada una sin el `NOMBRE=` del comienzo.
-3. Si Render le dio a la API otra dirección (cuando el nombre ya está tomado, agrega un sufijo), corrige `API_URL` en los dos servicios, en **Environment**.
-4. En cada servicio, **Settings → Deploy Hook**: copia la dirección y guárdala en GitHub (**Settings → Secrets and variables → Actions**) como secreto `RENDER_HOOK_API`, `RENDER_HOOK_TIENDA` y `RENDER_HOOK_BODEGA`.
+3. Si Render le dio a la API otra dirección (cuando el nombre ya está tomado, agrega un sufijo), corrige `API_URL` en los tres servicios, en **Environment**.
+4. En cada servicio, **Settings → Deploy Hook**: copia la dirección y guárdala en GitHub (**Settings → Secrets and variables → Actions**) como secreto `RENDER_HOOK_API`, `RENDER_HOOK_TIENDA`, `RENDER_HOOK_BODEGA` y `RENDER_HOOK_POS`. Sin `RENDER_HOOK_POS` se despliega el resto y el POS queda en su versión anterior.
 5. En la misma página, pestaña **Variables**, crea `RENDER_URL_TIENDA` con la dirección de la tienda (por ejemplo `https://rockstar-tienda.onrender.com`). Con ella, el pipeline espera la versión nueva; sin ella, solo pide el despliegue.
 
 Sin los secretos, el pipeline corre las pruebas y avisa que no despliega.
@@ -267,5 +283,11 @@ npm run test:e2e
 | `MIGRACIONES_DIR` | Carpeta de migraciones | `db/migrations` |
 | `ANTHROPIC_API_KEY` | Clave del servicio de IA del chat del asesor. Sin ella, el chat no se muestra | vacío |
 | `DEEZER_API_URL` | API de donde el asesor toma la popularidad de las bandas | `https://api.deezer.com` |
+| `WEBPAY_AMBIENTE` | Pasarela: `simulada`, `integracion` o `produccion` | `integracion` |
+| `WEBPAY_CODIGO_COMERCIO`, `WEBPAY_LLAVE_SECRETA` | Credenciales de Webpay en producción | vacío |
+| `STARKEN_AMBIENTE` | Envíos: `simulada`, `integracion` o `produccion` | `simulada` |
+| `STARKEN_API_URL`, `STARKEN_USUARIO`, `STARKEN_CLAVE` | API REST y credenciales de Starken; obligatorios fuera de `simulada` | vacío |
+| `STARKEN_SYNC_INTERVAL_MS` | Intervalo de actualización del seguimiento | `60000` |
+| `STARKEN_TRAMO_PESO`, `STARKEN_TRAMO_VOLUMEN` | Tamaño de los tramos de peso (g) y volumen (cm³) al cotizar | `1000`, `5000` |
 
 Las cuentas de demostración tienen contraseñas públicas. Fuera de desarrollo, usa `SEMBRAR_DEMO=false`.

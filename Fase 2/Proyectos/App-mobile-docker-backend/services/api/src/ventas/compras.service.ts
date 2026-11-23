@@ -93,7 +93,7 @@ export class ComprasService implements OnModuleInit, OnModuleDestroy {
         return this.respuestaDeCheckout(tx, previa.id_venta);
       }
 
-      const flete = (await this.fletes.cotizar(tx, despacho.idComuna)).valor;
+      const flete = (await this.fletes.cotizar(tx, despacho.idComuna, lineas)).valor;
       const variantes = await this.reservables(tx, lineas);
       const subtotal = lineas.reduce((suma, linea) => suma + variantes.get(linea.idVariante)!.precio! * linea.cantidad, 0);
       const total = subtotal + flete;

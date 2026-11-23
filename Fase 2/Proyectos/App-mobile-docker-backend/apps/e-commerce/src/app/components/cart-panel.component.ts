@@ -1,7 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { IonButton, IonIcon, IonItem, IonSelect, IonSelectOption, IonInput } from '@ionic/angular/standalone';
+import { IonButton, IonIcon, IonItem, IonSelect, IonSelectOption, IonInput, IonSegment, IonSegmentButton } from '@ionic/angular/standalone';
 import type { Comuna, Region } from '@rockstar/contracts';
 import { addIcons } from 'ionicons';
 import { addOutline, removeOutline, trashOutline, cardOutline, alertCircleOutline } from 'ionicons/icons';
@@ -11,6 +11,7 @@ import { AuthService } from '../services/auth.service';
 import { CartService, ShippingData } from '../services/cart.service';
 import { ProductsService } from '../services/products.service';
 import { ShopApi } from '../services/shop.api';
+import { SimulacionEnvioService } from '../services/simulacion-envio.service';
 import { ToastService } from '../services/toast.service';
 
 /**
@@ -20,17 +21,85 @@ import { ToastService } from '../services/toast.service';
 @Component({
   selector: 'app-cart-panel',
   standalone: true,
-  imports: [CommonModule, IonButton, IonIcon, IonItem, IonSelect, IonSelectOption, IonInput],
+  imports: [CommonModule, IonButton, IonIcon, IonItem, IonSelect, IonSelectOption, IonInput, IonSegment, IonSegmentButton],
   template: `
       <div class="panel">
-        <div class="notice" *ngIf="changes().length > 0" role="status">
+        <ion-segment [value]="segmento()" (ionChange)="onSegmento($event)">
+          <ion-segment-button value="CARRITO">Carrito</ion-segment-button>
+          <ion-segment-button value="SIMULAR">Simular envío</ion-segment-button>
+        </ion-segment>
+
+        <ng-container *ngIf="segmento() === 'SIMULAR'">
+          <div class="simulacion">
+            <ng-container *ngIf="cart.items().length === 0">
+              <p class="sim-vacio">Tu carrito está vacío: agrega productos y elige el destino para simular el envío.</p>
+            </ng-container>
+            <ng-container *ngIf="cart.items().length > 0">
+              <div class="cart-items">
+                <div class="cart-item" *ngFor="let item of cart.items()">
+                  <div class="item-name">{{ item.name }}</div>
+                  <div class="item-price">Talla {{ item.size }} · {{ formatCLP(item.price) }} · {{ item.qty }} un.</div>
+                </div>
+              </div>
+              <ion-item lines="none" class="input-item">
+                <ion-select
+                  label="Región"
+                  labelPlacement="stacked"
+                  interface="popover"
+                  placeholder="Elige una región"
+                  [value]="simulacion.region()"
+                  (ionChange)="onSimRegion($event)"
+                >
+                  <ion-select-option *ngFor="let r of regions()" [value]="r.idRegion">{{ r.nombre }}</ion-select-option>
+                </ion-select>
+              </ion-item>
+              <ion-item lines="none" class="input-item">
+                <ion-select
+                  label="Comuna"
+                  labelPlacement="stacked"
+                  interface="popover"
+                  placeholder="Elige una comuna"
+                  [disabled]="simulacion.comunas().length === 0"
+                  [value]="simulacion.comuna()"
+                  (ionChange)="onSimComuna($event)"
+                >
+                  <ion-select-option [value]="null">Sin comuna</ion-select-option>
+                  <ion-select-option *ngFor="let c of simulacion.comunas()" [value]="c.idComuna">{{ c.nombre }}</ion-select-option>
+                </ion-select>
+              </ion-item>
+              <p class="sim-hint" *ngIf="simulacion.sinCobertura()" role="alert">
+                No hay despacho a ese destino; elige otra comuna.
+              </p>
+              <p class="error-msg" *ngIf="simulacion.error()" role="alert">{{ simulacion.error() }}</p>
+              <ion-button expand="block" [disabled]="simulacion.ocupada()" (click)="simulacion.reintentar()" *ngIf="simulacion.error()">
+                Reintentar
+              </ion-button>
+              <div class="totals" *ngIf="simulacion.costo() !== null">
+                <div class="total-row">
+                  <span>Costo de envío (estimado)</span>
+                  <span>{{ formatCLP(simulacion.costo()!) }}</span>
+                </div>
+              </div>
+              <ion-button
+                expand="block"
+                class="btn-rockstar"
+                [disabled]="!simulacion.puedeUsar() || simulacion.ocupada()"
+                (click)="simulacion.usarDestino()"
+              >
+                Usar este destino
+              </ion-button>
+            </ng-container>
+          </div>
+        </ng-container>
+
+        <div class="notice" *ngIf="segmento() === 'CARRITO' && changes().length > 0" role="status">
           <ion-icon name="alert-circle-outline"></ion-icon>
           <div>
             <div *ngFor="let change of changes()">{{ change }}</div>
           </div>
         </div>
 
-        <ng-container *ngIf="cart.items().length > 0; else empty">
+        <ng-container *ngIf="segmento() === 'CARRITO' && cart.items().length > 0; else empty">
           <div class="cart-items">
             <div class="cart-item" *ngFor="let item of cart.items()">
               <img [src]="item.image" [alt]="item.name" (error)="usePlaceholder($event)" />
@@ -145,7 +214,7 @@ import { ToastService } from '../services/toast.service';
         </ng-container>
 
         <ng-template #empty>
-          <div class="empty-state">
+          <div class="empty-state" *ngIf="segmento() === 'CARRITO'">
             <p>Tu carrito está vacío.</p>
             <ion-button class="btn-rockstar" (click)="keepShopping()">Seguir comprando</ion-button>
           </div>
@@ -161,6 +230,17 @@ import { ToastService } from '../services/toast.service';
       background: rgba(133, 77, 14, 0.2); color: #fde68a; font-size: 13px; line-height: 1.5;
     }
     .notice ion-icon { flex: none; font-size: 18px; margin-top: 1px; }
+    .simulacion { display: flex; flex-direction: column; gap: 10px; }
+    .sim-vacio { color: var(--text-faint); font-size: 12px; margin: 0; padding: 60px 20px; text-align: center; }
+    .sim-hint {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(133, 77, 14, 0.2);
+      border: 1px solid #854d0e;
+      color: #fde68a;
+      font-size: 13px;
+      line-height: 1.4;
+    }
     .cart-items { display: flex; flex-direction: column; gap: 12px; }
     .cart-item {
       display: flex;
@@ -222,6 +302,10 @@ export class CartPanelComponent {
 
   regions = signal<Region[]>([]);
   comunas = signal<Comuna[]>([]);
+  /** Segmento activo de la pestaña: "Carrito" o "Simular envío". */
+  readonly segmento = signal<'CARRITO' | 'SIMULAR'>('CARRITO');
+  /** Simulación del envío del carrito antes de comprar. */
+  readonly simulacion = inject(SimulacionEnvioService);
   /** Lo que cambió en el carrito al ponerlo al día con el catálogo. */
   changes = signal<string[]>([]);
   error = signal('');
@@ -244,6 +328,21 @@ export class CartPanelComponent {
   keepShopping() {
     this.cart.close();
     this.router.navigateByUrl('/shop');
+  }
+
+  /** Cambia el segmento activo de la pestaña: carrito o simulación. */
+  onSegmento(ev: Event) {
+    this.segmento.set((ev as CustomEvent).detail.value as 'CARRITO' | 'SIMULAR');
+  }
+
+  /** Cambia la región simulada; los casts están aquí porque en la plantilla no se permite `as`. */
+  onSimRegion(ev: Event) {
+    this.simulacion.cambiarRegion((ev as CustomEvent).detail.value as number);
+  }
+
+  /** Cambia la comuna simulada y vuelve a cotizar. */
+  onSimComuna(ev: Event) {
+    this.simulacion.cambiarComuna((ev as CustomEvent).detail.value as number | null);
   }
 
   /** Pone el carrito al día con los precios y la disponibilidad actuales, y carga los destinos. */

@@ -29,8 +29,8 @@ export interface Configuracion {
   deezerUrl: string;
   /** Pasarela con que se pagan las compras de la tienda web. */
   webpay: ConfiguracionWebpay;
-  /** Transportista con que se cotizan y emiten los despachos de la tienda web. */
-  starken: AmbienteStarken;
+  /** Proveedor de cotizaciones, despachos y seguimiento. */
+  starken: ConfiguracionStarken;
   /** Commit que se está ejecutando, si quien despliega lo informa (Render, en `RENDER_GIT_COMMIT`). */
   version?: string;
   /** Máquinas de cobro Mercado Pago Point del POS. */
@@ -45,20 +45,6 @@ export interface ConfiguracionMercadoPago {
   accessToken?: string;
   /** Dirección de la API de Mercado Pago; se cambia solo para probar contra un doble. */
   url: string;
-}
-
-/**
- * `simulado` cotiza tarifas fijas y emite despachos ficticios. `desactivado` apaga los envíos:
- * las compras no cobran flete y los pedidos quedan pagados sin despacho.
- */
-export type AmbienteStarken = 'simulado' | 'desactivado';
-
-function leerStarken(env: NodeJS.ProcessEnv): AmbienteStarken {
-  const ambiente = env['STARKEN_AMBIENTE']?.trim().toLowerCase() || 'simulado';
-  if (ambiente !== 'simulado' && ambiente !== 'desactivado') {
-    throw new Error('La variable STARKEN_AMBIENTE debe ser simulado o desactivado.');
-  }
-  return ambiente;
 }
 
 /**
@@ -101,6 +87,52 @@ function leerWebpay(env: NodeJS.ProcessEnv): ConfiguracionWebpay {
   }
   const urlRetorno = env['WEBPAY_URL_RETORNO']?.trim() || undefined;
   return { ambiente, codigoComercio, llaveSecreta, ...(urlRetorno ? { urlRetorno } : {}) };
+}
+
+/**
+ * `simulada` no sale a Starken: el doble decide cotizaciones, despachos y eventos.
+ * `integracion` y `produccion` usan la API REST y exigen dirección y credenciales.
+ * `desactivado` apaga los envíos: las compras no cobran flete y los pedidos quedan pagados sin despacho.
+ */
+export type AmbienteStarken = 'simulada' | 'desactivado' | 'integracion' | 'produccion';
+
+interface ConfiguracionStarkenComun {
+  /** Cada cuánto se consulta el seguimiento de los pedidos ya despachados. */
+  sincronizacionMs: number;
+  /** Tamaño de un tramo de peso (gramos) y de volumen (cm³) para las cotizaciones. */
+  tramoPesoGramos: number;
+  tramoVolumenCm3: number;
+}
+
+export type ConfiguracionStarken = ConfiguracionStarkenComun &
+  (
+    | { ambiente: 'simulada' | 'desactivado' }
+    | { ambiente: 'integracion' | 'produccion'; apiUrl: string; usuario: string; clave: string }
+  );
+
+function leerStarken(env: NodeJS.ProcessEnv): ConfiguracionStarken {
+  const ambiente = (env['STARKEN_AMBIENTE']?.trim().toLowerCase() || 'simulada') as AmbienteStarken;
+  const comun: ConfiguracionStarkenComun = {
+    sincronizacionMs: entero(env['STARKEN_SYNC_INTERVAL_MS'], 60_000, 'STARKEN_SYNC_INTERVAL_MS'),
+    tramoPesoGramos: entero(env['STARKEN_TRAMO_PESO'], 1_000, 'STARKEN_TRAMO_PESO'),
+    tramoVolumenCm3: entero(env['STARKEN_TRAMO_VOLUMEN'], 5_000, 'STARKEN_TRAMO_VOLUMEN'),
+  };
+  if (ambiente === 'simulada' || ambiente === 'desactivado') {
+    return { ambiente, ...comun };
+  }
+  if (ambiente !== 'integracion' && ambiente !== 'produccion') {
+    throw new Error('La variable STARKEN_AMBIENTE debe ser simulada, desactivado, integracion o produccion.');
+  }
+  const apiUrl = env['STARKEN_API_URL']?.trim().replace(/\/+$/, '') || '';
+  const usuario = env['STARKEN_USUARIO']?.trim() || '';
+  const clave = env['STARKEN_CLAVE']?.trim() || '';
+  if (!apiUrl || !usuario || !clave) {
+    throw new Error(
+      `Starken en ${ambiente} necesita STARKEN_API_URL, STARKEN_USUARIO y STARKEN_CLAVE. ` +
+        'Si aún no tienes cuenta comercial, deja STARKEN_AMBIENTE=simulada.',
+    );
+  }
+  return { ambiente, ...comun, apiUrl, usuario, clave };
 }
 
 const VERDADERO = new Set(['1', 'true', 'si', 'sí', 'yes']);
