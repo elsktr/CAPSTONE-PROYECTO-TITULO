@@ -398,10 +398,18 @@ export class ProbadorComponent implements AfterViewInit, OnDestroy {
   readonly tipo = computed(() => tipoDePrenda(this.producto().category, this.producto().name) ?? 'polera');
   /** Por ahora solo las poleras se quedan en su talla al cambiar el peso y aconsejan otra. */
   readonly polera = computed(() => esPolera(this.tipo()));
-  readonly recomendada = computed(() => recomendarTalla(this.cuerpo(), this.tipo()));
-  readonly tallas = computed(() =>
-    tablaDeTallas(this.tipo()).map(({ talla }) => ({ talla, variante: this.varianteDe(talla) })),
-  );
+  /** Tallas que la tienda tiene de la prenda en este color (con o sin stock); sin variantes, todas las de la tabla. */
+  readonly tallas = computed(() => {
+    const tabla = tablaDeTallas(this.tipo()).map(({ talla }) => ({ talla, variante: this.varianteDe(talla) }));
+    const existentes = tabla.filter(({ talla }) => this.variantes().some((v) => mismaTalla(v.size, talla)));
+    return existentes.length ? existentes : tabla;
+  });
+  /** Las tallas que se pueden comprar: la recomendación y el consejo solo usan estas. */
+  readonly disponibles = computed(() => {
+    const conStock = this.tallas().filter((t) => t.variante).map((t) => t.talla);
+    return conStock.length ? conStock : this.tallas().map((t) => t.talla);
+  });
+  readonly recomendada = computed(() => recomendarTalla(this.cuerpo(), this.tipo(), this.disponibles()));
 
   /**
    * Talla puesta en el maniquí. Se abre con la recomendada. En una polera no cambia sola: si el
@@ -414,7 +422,7 @@ export class ProbadorComponent implements AfterViewInit, OnDestroy {
   readonly varianteElegida = computed(() => this.varianteDe(this.tallaElegida()));
   readonly ajuste = computed(() => evaluarAjuste(this.cuerpo(), this.tipo(), this.tallaElegida()));
   /** Subir o bajar de talla, si la polera puesta no calza. */
-  readonly consejo = computed(() => (this.polera() ? aconsejarTalla(this.cuerpo(), this.tipo(), this.tallaElegida()) : null));
+  readonly consejo = computed(() => (this.polera() ? aconsejarTalla(this.cuerpo(), this.tipo(), this.tallaElegida(), this.disponibles()) : null));
   readonly zonaMedida = computed(() => zonaDeReferencia(this.cuerpo(), this.tipo()));
   /** Talla americana del fabricante, en los pantalones. */
   readonly equivalencia = computed(() => medidasDeTalla(this.tipo(), this.tallaElegida())?.equivalencia ?? null);

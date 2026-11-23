@@ -277,6 +277,32 @@ describe('recomendarTalla', () => {
     expect(recomendarTalla(estimarCuerpo({ altura: 200, peso: 175 }), 'polera')).toBe('XXXL');
   });
 
+  it('a una persona alta y delgada le sube la talla de arriba para que no quede corta', () => {
+    const alto = estimarCuerpo({ altura: 180, peso: 65 });
+    for (const tipo of ['poleron', 'chaqueta'] as const) {
+      const talla = recomendarTalla(alto, tipo);
+      expect(talla).not.toBe('S');
+      expect(evaluarAjuste(alto, tipo, talla)?.largo).not.toBe('corta');
+    }
+    // En el pantalón manda la cintura.
+    expect(recomendarTalla(alto, 'pantalon')).toBe('40');
+  });
+
+  it('solo recomienda tallas que la tienda tiene: la más cercana y, si empatan, la más grande', () => {
+    const delgado = estimarCuerpo({ altura: 170, peso: 65 });
+    expect(recomendarTalla(delgado, 'polera')).toBe('S');
+    expect(recomendarTalla(delgado, 'polera', ['M', 'L'])).toBe('M');
+    const grande = estimarCuerpo({ altura: 175, peso: 110 });
+    expect(recomendarTalla(grande, 'polera', ['M', 'L'])).toBe('L');
+    // S ideal entre XS y M: gana la más grande.
+    expect(recomendarTalla(delgado, 'chaqueta', ['XS', 'M'])).toBe('M');
+  });
+
+  it('el consejo de talla solo propone tallas que la tienda tiene', () => {
+    const grande = estimarCuerpo({ altura: 175, peso: 110 });
+    expect(aconsejarTalla(grande, 'polera', 'M', ['M', 'L'])).toMatchObject({ cambio: 'subir', talla: 'L' });
+  });
+
   it('la talla recomendada siempre queda justa de ancho', () => {
     for (const peso of [50, 65, 80, 95, 110]) {
       const cuerpo = estimarCuerpo({ altura: 175, peso });

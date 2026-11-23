@@ -416,13 +416,37 @@ export function evaluarAjuste(cuerpo: MedidasCuerpo, tipo: TipoPrenda, talla: st
   };
 }
 
-/** La talla cuyo rango contiene el contorno del cuerpo; fuera de la tabla, la del extremo más cercano. */
-export function recomendarTalla(cuerpo: MedidasCuerpo, tipo: TipoPrenda): string {
+/** Cuántas tallas puede subir una prenda de arriba para no quedar corta. */
+const TALLAS_POR_LARGO = 2;
+
+/**
+ * La talla cuyo rango contiene el contorno del cuerpo; fuera de la tabla, la del extremo más
+ * cercano. Si una prenda de arriba queda corta (una persona alta y delgada), se sube hasta
+ * `TALLAS_POR_LARGO` tallas mientras siga corta: mejor un poco más suelta que corta. En el
+ * pantalón manda la cintura, porque el largo de pierna casi no cambia entre tallas.
+ *
+ * Con `disponibles` (las tallas que la tienda tiene de la prenda) solo recomienda una de ellas:
+ * la más cercana a la ideal y, entre dos igual de cercanas, la más grande.
+ */
+export function recomendarTalla(cuerpo: MedidasCuerpo, tipo: TipoPrenda, disponibles?: readonly string[]): string {
   const tabla = tablaDeTallas(tipo);
   const contorno = contornoDeReferencia(cuerpo, tipo);
-  const dentro = tabla.find((medidas) => contorno >= medidas.desde && contorno < medidas.hasta);
-  if (dentro) return dentro.talla;
-  return contorno < tabla[0]!.desde ? tabla[0]!.talla : tabla[tabla.length - 1]!.talla;
+  const dentro = tabla.findIndex((medidas) => contorno >= medidas.desde && contorno < medidas.hasta);
+  let indice = dentro >= 0 ? dentro : contorno < tabla[0]!.desde ? 0 : tabla.length - 1;
+  const limite = Math.min(indice + TALLAS_POR_LARGO, tabla.length - 1);
+  while (tipo !== 'pantalon' && indice < limite && evaluarAjuste(cuerpo, tipo, tabla[indice]!.talla)?.largo === 'corta') indice++;
+  return masCercana(tabla, indice, disponibles);
+}
+
+/** La talla de `disponibles` más cercana a la de la posición `ideal` de la tabla; sin ellas, la ideal. */
+function masCercana(tabla: MedidasTalla[], ideal: number, disponibles?: readonly string[]): string {
+  const existentes = tabla
+    .map((medidas, i) => ({ talla: medidas.talla, i }))
+    .filter(({ talla }) => !disponibles || disponibles.some((d) => mismaTalla(d, talla)));
+  if (!existentes.length) return tabla[ideal]!.talla;
+  // Con la misma distancia gana la más grande: mejor un poco suelta que apretada o corta.
+  existentes.sort((a, b) => Math.abs(a.i - ideal) - Math.abs(b.i - ideal) || b.i - a.i);
+  return existentes[0]!.talla;
 }
 
 export function mismaTalla(a: string, b: string): boolean {
@@ -441,16 +465,23 @@ export interface ConsejoTalla {
   calza: boolean;
 }
 
-export function aconsejarTalla(cuerpo: MedidasCuerpo, tipo: TipoPrenda, talla: string): ConsejoTalla | null {
+export function aconsejarTalla(cuerpo: MedidasCuerpo, tipo: TipoPrenda, talla: string, disponibles?: readonly string[]): ConsejoTalla | null {
   const ajuste = evaluarAjuste(cuerpo, tipo, talla);
   if (!ajuste || ajuste.ancho === 'justa') return null;
   const tabla = tablaDeTallas(tipo);
   const actual = tabla.findIndex((medidas) => mismaTalla(medidas.talla, talla));
   const cambio = ajuste.ancho === 'apretada' ? 'subir' : 'bajar';
-  const candidatas = cambio === 'subir' ? tabla.slice(actual + 1) : tabla.slice(0, actual).reverse();
+  // Solo se aconsejan tallas que la tienda tiene, si se indican.
+  const candidatas = (cambio === 'subir' ? tabla.slice(actual + 1) : tabla.slice(0, actual).reverse()).filter(
+    (medidas) => !disponibles || disponibles.some((d) => mismaTalla(d, medidas.talla)),
+  );
   // Al subir basta con que deje de apretar (un pantalón que calza de cadera puede sobrar de
   // cintura); al bajar, con que deje de sobrar.
-  const calza = candidatas.find((medidas) => evaluarAjuste(cuerpo, tipo, medidas.talla)?.ancho !== ajuste.ancho);
+  // Al bajar no se aconseja una talla que quede corta.
+  const calza = candidatas.find((medidas) => {
+    const otra = evaluarAjuste(cuerpo, tipo, medidas.talla);
+    return otra?.ancho !== ajuste.ancho && (cambio === 'subir' || otra?.largo !== 'corta');
+  });
   if (calza) return { cambio, talla: calza.talla, calza: true };
   return { cambio, talla: candidatas[candidatas.length - 1]?.talla ?? null, calza: false };
 }
