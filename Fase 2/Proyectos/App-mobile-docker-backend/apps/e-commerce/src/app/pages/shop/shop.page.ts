@@ -15,7 +15,7 @@ import { cleanQuery, matchesQuery } from '../../data/search';
 import { tipoDePrenda } from '../../data/probador';
 import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.component';
 import { SiteFooterComponent } from '../../components/site-footer.component';
-import { categoryDescription, categoryKinds } from '../../data/categorias';
+import { categoryDescription, categoryKinds, categoryPhoto } from '../../data/categorias';
 
 /** Productos que la portada muestra de cada categoría; el resto se ve entrando a ella. */
 const PRODUCTS_PER_CATEGORY = 4;
@@ -95,7 +95,17 @@ const BG_FADE_MS = 450;
       <ng-container *ngIf="!hasFilters()">
         <section class="category" *ngFor="let section of sections()">
           <!-- Tarjeta que abre la categoría: qué tipos tiene, de qué se trata y su prenda más barata. -->
-          <div class="category-banner">
+          <div class="category-banner" [class.with-photo]="section.photo">
+            <!-- Alguien usando la prenda: ambientación, por eso sin texto alternativo. -->
+            <img
+              *ngIf="section.photo as photo"
+              class="banner-photo"
+              [src]="photo.src"
+              [style.object-position]="photo.position"
+              alt=""
+              loading="lazy"
+              (error)="hidePhoto($event)"
+            />
             <div class="banner-text">
               <div class="section-title">Categoría</div>
               <h2>{{ section.name }}</h2>
@@ -384,6 +394,25 @@ const BG_FADE_MS = 450;
     @media (min-width: 720px) {
       .category-banner { grid-template-columns: minmax(0, 1fr) 220px; gap: 32px; padding: 28px 32px; }
     }
+    /* Foto de alguien usando la prenda: ocupa el lado derecho y se funde hacia el texto. */
+    .banner-photo {
+      position: absolute; top: 0; right: 0; bottom: 0; width: 100%; height: 100%;
+      object-fit: cover; opacity: 0.35;
+      -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 85%);
+      mask-image: linear-gradient(180deg, #000 0%, transparent 85%);
+      pointer-events: none;
+    }
+    @media (min-width: 720px) {
+      .banner-photo {
+        width: 68%; opacity: 0.85;
+        -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 45%);
+        mask-image: linear-gradient(90deg, transparent 0%, #000 45%);
+      }
+    }
+    .banner-text, .banner-pick { position: relative; z-index: 1; }
+    .category-banner::before { z-index: 1; }
+    .with-photo .banner-desc { color: #d4d4d8; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+    .with-photo .banner-text h2 { text-shadow: 0 2px 16px rgba(0, 0, 0, 0.7); }
     .banner-text .section-title { font-size: 11px; margin-bottom: 6px; }
     .banner-text h2 {
       margin: 0; font-size: 34px; font-weight: 900; text-transform: uppercase; line-height: 1; letter-spacing: 0.02em;
@@ -613,6 +642,7 @@ export class ShopPage {
         products: [...available, ...soldOut].slice(0, PRODUCTS_PER_CATEGORY),
         cheapest,
         description: categoryDescription(name),
+        photo: categoryPhoto(name),
         kinds: categoryKinds(name, all),
       };
     }),
@@ -631,6 +661,11 @@ export class ShopPage {
   discountPercent = discountPercent;
   formatDay = formatDay;
   usePlaceholder = usePlaceholder;
+
+  /** Si la foto de una categoría no carga, la tarjeta queda sin ella en vez de con un ícono roto. */
+  hidePhoto(event: Event) {
+    (event.target as HTMLElement).style.display = 'none';
+  }
 
   addToCart(p: Product) {
     const result = this.cart.add(p);

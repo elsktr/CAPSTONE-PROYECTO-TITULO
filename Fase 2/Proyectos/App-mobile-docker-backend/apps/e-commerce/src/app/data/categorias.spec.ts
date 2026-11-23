@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { categoryDescription, categoryKinds, compareCategories } from './categorias';
+import { readdirSync } from 'node:fs';
+
+import { categoryDescription, categoryKinds, categoryPhoto, compareCategories } from './categorias';
 import type { Product } from './models';
 
 function product(name: string, extra: Partial<Product> = {}): Product {
@@ -33,6 +35,21 @@ describe('categoryKinds', () => {
 
   it('no inventa tipos para una categoría que no conoce', () => {
     expect(categoryKinds('Accesorios', [product('Cinturón de tachas')])).toEqual([]);
+  });
+});
+
+describe('categoryPhoto', () => {
+  it('cada categoría conocida tiene una foto que existe en public/assets', () => {
+    const archivos = readdirSync(new URL('../../../public/assets/categorias/', import.meta.url));
+    for (const categoria of ['Poleras', 'Polerones', 'Chaquetas', 'Pantalones']) {
+      const foto = categoryPhoto(categoria);
+      expect(foto, categoria).not.toBeNull();
+      expect(archivos).toContain(foto!.src.split('/').pop());
+    }
+  });
+
+  it('una categoría desconocida no tiene foto', () => {
+    expect(categoryPhoto('Accesorios')).toBeNull();
   });
 });
 
