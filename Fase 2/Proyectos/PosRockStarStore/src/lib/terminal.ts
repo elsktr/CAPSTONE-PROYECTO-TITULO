@@ -1,12 +1,15 @@
 /**
- * Maquina de cobro (terminal de tarjetas) de la caja, en uno de dos modos:
+ * Maquina de cobro (terminal de tarjetas) de la caja, en uno de tres modos:
  *
  * - Prueba: la maquina simulada (`terminal-simulada/`), a la que el navegador de la caja
  *   le habla directo por HTTP a su IP. Responde con los codigos de Mercado Pago Point.
+ * - Caja: una maquina simulada dentro del mismo POS, sin nada que instalar. Sirve en un
+ *   telefono o en la web publicada, donde no hay maquina de prueba en la red.
  * - Mercado Pago Point: una maquina real. La caja le pide a la API que cobre en ella; la
  *   API tiene el access token de la cuenta de Mercado Pago.
  *
- * Las dos cumplen `MaquinaDeCobro`: el flujo de venta no distingue cual se usa.
+ * Todas cumplen `MaquinaDeCobro`: el flujo de venta no distingue cual se usa. Las simuladas
+ * ademas permiten aprobar o rechazar el cobro desde la caja (`simular`).
  */
 
 import {
@@ -54,7 +57,17 @@ export interface MaquinaDeCobro {
   anular(id: string): Promise<CobroMaquina>;
   /** Cada cuanto consultar el cobro mientras se espera el pago; por omision, cada segundo. */
   readonly intervaloMs?: number;
+  /**
+   * Solo las maquinas simuladas: resuelve el cobro pendiente como si el cliente hubiera
+   * pagado o el banco lo hubiera rechazado. Una maquina real no lo tiene.
+   */
+  simular?(id: string, resultado: ResultadoSimulado): Promise<void>;
 }
+
+export type ResultadoSimulado = 'APROBAR' | 'RECHAZAR';
+
+/** Codigo de Mercado Pago con que se simula un rechazo. */
+const RECHAZO_SIMULADO = { codigo: 'insufficient_amount', motivo: 'Fondos insuficientes.' };
 
 export class ErrorMaquina extends Error {
   constructor(
@@ -66,8 +79,9 @@ export class ErrorMaquina extends Error {
   }
 }
 
-/** `prueba`: la maquina simulada en la red. `mercadopago`: una maquina Point real. */
-export type ModoMaquina = 'prueba' | 'mercadopago';
+/** `prueba`: la maquina simulada en la red. `caja`: simulada en el POS. `mercadopago`: una maquina Point real. */
+export type ModoMaquina = 'prueba' | 'caja' | 'mercadopago';
+const MODOS: readonly ModoMaquina[] = ['prueba', 'caja', 'mercadopago'];
 
 /** Configuracion de esta caja: cada caja tiene su maquina al lado. */
 export interface ConfigMaquina {
@@ -88,7 +102,7 @@ export function leerConfigMaquina(): ConfigMaquina {
     return {
       activa: guardada?.activa === true,
       // Una configuracion de antes de los modos era siempre la maquina simulada.
-      modo: guardada?.modo === 'mercadopago' ? 'mercadopago' : 'prueba',
+      modo: MODOS.includes(guardada?.modo as ModoMaquina) ? (guardada!.modo as ModoMaquina) : 'prueba',
       direccion: typeof guardada?.direccion === 'string' && guardada.direccion.trim() ? guardada.direccion : CONFIG_MAQUINA_INICIAL.direccion,
       terminal: typeof guardada?.terminal === 'string' ? guardada.terminal : '',
     };
@@ -181,8 +195,86 @@ export function maquinaHttp(direccion: string, fetchImpl: typeof fetch = (...a) 
       }
     },
     anular: (id) => pedir<CobroMaquina>('POST', `/api/cobros/${encodeURIComponent(id)}/anular`),
+    // Los mismos botones que tiene la pantalla de la maquina simulada.
+    simular: async (id, resultado) => {
+      const ruta = `/api/cobros/${encodeURIComponent(id)}/${resultado === 'APROBAR' ? 'aprobar' : 'rechazar'}`;
+      await pedir<CobroMaquina>('POST', ruta, resultado === 'RECHAZAR' ? { codigo: RECHAZO_SIMULADO.codigo } : {});
+    },
   };
 }
+
+/** Numero de `digitos` cifras al azar, con ceros a la izquierda. */
+function cifras(digitos: number): string {
+  return String(Math.floor(Math.random() * 10 ** digitos)).padStart(digitos, '0');
+}
+
+/**
+ * Identificador del cobro simulado. `crypto.randomUUID` solo existe en paginas seguras (https
+ * o localhost); el POS abierto por la IP del equipo no lo es.
+ */
+function idSimulado(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `caja-${Date.now().toString(36)}-${cifras(8)}`;
+}
+
+/**
+ * Maquina simulada dentro del POS: guarda los cobros en memoria y los resuelve con `simular`.
+ * Imita a la maquina de prueba: un cobro a la vez y los mismos estados y codigos.
+ */
+export function maquinaEnLaCaja(): MaquinaDeCobro {
+  const cobros = new Map<string, CobroMaquina>();
+  const buscar = (id: string): CobroMaquina => {
+    const cobro = cobros.get(id);
+    if (!cobro) throw new ErrorMaquina('El cobro no existe.', 'NO_ENCONTRADO');
+    return cobro;
+  };
+  const cambiar = (id: string, desde: CobroMaquina['estado'], cambios: Partial<CobroMaquina>): CobroMaquina => {
+    const cobro = buscar(id);
+    if (cobro.estado !== desde) {
+      throw new ErrorMaquina(`El cobro está ${cobro.estado.toLowerCase()}.`, 'ESTADO_INVALIDO', { ...cobro });
+    }
+    Object.assign(cobro, cambios);
+    return { ...cobro };
+  };
+
+  return {
+    intervaloMs: 500,
+    info: async () => ({ nombre: 'Máquina simulada en la caja', modelo: 'Simulada', serie: 'CAJA' }),
+    cobrar: async (monto, tipo, referencia) => {
+      if ([...cobros.values()].some((c) => c.estado === 'PENDIENTE')) {
+        throw new ErrorMaquina('La máquina tiene otro cobro en curso.', 'OCUPADA');
+      }
+      const cobro: CobroMaquina = {
+        id: idSimulado(), monto, tipo, referencia, estado: 'PENDIENTE',
+        codigoAutorizacion: null, tarjeta: null, motivo: null, codigo: null,
+      };
+      cobros.set(cobro.id, cobro);
+      return { ...cobro };
+    },
+    consultar: async (id) => ({ ...buscar(id) }),
+    cancelar: async (id) => {
+      const cobro = buscar(id);
+      // Igual que la maquina de prueba: si ya se pago, se responde el cobro como quedo.
+      if (cobro.estado !== 'PENDIENTE') return { ...cobro };
+      return cambiar(id, 'PENDIENTE', { estado: 'CANCELADO', motivo: 'Cobro cancelado desde la caja.', codigo: 'canceled' });
+    },
+    anular: async (id) => {
+      if (buscar(id).estado === 'ANULADO') return { ...buscar(id) };
+      return cambiar(id, 'APROBADO', { estado: 'ANULADO' });
+    },
+    simular: async (id, resultado) => {
+      cambiar(
+        id,
+        'PENDIENTE',
+        resultado === 'APROBAR'
+          ? { estado: 'APROBADO', codigo: 'accredited', codigoAutorizacion: cifras(6), tarjeta: `•••• ${cifras(4)}` }
+          : { estado: 'RECHAZADO', ...RECHAZO_SIMULADO },
+      );
+    },
+  };
+}
+
+/** La maquina de la caja vive mientras el POS esta abierto: la misma para todas las ventas. */
+let maquinaDeLaCaja: MaquinaDeCobro | null = null;
 
 /** La maquina Point se consulta cada 2 segundos: cada consulta pasa por la API hasta Mercado Pago. */
 const INTERVALO_POINT_MS = 2000;
@@ -234,7 +326,9 @@ export function maquinaMercadoPago(accessToken: string, terminal: string): Maqui
 
 /** La maquina de esta caja segun su configuracion. */
 export function maquinaDeConfig(config: ConfigMaquina, accessToken: string): MaquinaDeCobro {
-  return config.modo === 'mercadopago' ? maquinaMercadoPago(accessToken, config.terminal) : maquinaHttp(config.direccion);
+  if (config.modo === 'mercadopago') return maquinaMercadoPago(accessToken, config.terminal);
+  if (config.modo === 'caja') return (maquinaDeLaCaja ??= maquinaEnLaCaja());
+  return maquinaHttp(config.direccion);
 }
 
 /** Fallas de red seguidas que se toleran mientras se espera el pago. */

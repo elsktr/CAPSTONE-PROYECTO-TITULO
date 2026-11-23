@@ -1,7 +1,7 @@
 import { IonButton, IonContent, IonHeader, IonIcon, IonModal, IonSpinner, IonTitle, IonToolbar } from '@ionic/react';
 import { useEffect, useRef, useState } from 'react';
-import { alertCircleOutline, cardOutline, closeCircleOutline } from 'ionicons/icons';
-import { CobroMaquina, ErrorMaquina, MaquinaDeCobro, TipoTarjeta, esperarResultado } from '../lib/terminal';
+import { alertCircleOutline, cardOutline, checkmarkCircleOutline, closeCircleOutline } from 'ionicons/icons';
+import { CobroMaquina, ErrorMaquina, MaquinaDeCobro, ResultadoSimulado, TipoTarjeta, esperarResultado } from '../lib/terminal';
 import { formatCLP } from '../utils/format';
 
 /** Titulo del resultado de un cobro que no se aprobo. */
@@ -121,6 +121,23 @@ export const CobroEnMaquina: React.FC<Props> = ({ isOpen, maquina, monto, tarjet
     }
   };
 
+  /** Maquina simulada: resuelve el cobro desde la caja, sin ir a la pantalla de la maquina. */
+  const [simulando, setSimulando] = useState(false);
+  const simular = async (resultado: ResultadoSimulado) => {
+    const cobro = cobroActual.current;
+    if (!cobro || !maquina.simular) return;
+    setSimulando(true);
+    try {
+      // La espera en curso ve el cambio en su proxima consulta y sigue como con una maquina real.
+      await maquina.simular(cobro.id, resultado);
+    } catch (error) {
+      detenerEspera();
+      setPaso({ tipo: 'error', mensaje: error instanceof Error ? error.message : 'No se pudo simular el pago.' });
+    } finally {
+      setSimulando(false);
+    }
+  };
+
   useEffect(() => () => detenerEspera(), []);
 
   const esperandoPago = paso.tipo === 'enviando' || paso.tipo === 'esperando' || paso.tipo === 'cancelando';
@@ -154,6 +171,20 @@ export const CobroEnMaquina: React.FC<Props> = ({ isOpen, maquina, monto, tarjet
                 {paso.tipo === 'cancelando' && 'Cancelando el cobro…'}
               </strong>
               {paso.tipo === 'esperando' && <span>Pide al cliente acercar, insertar o deslizar su tarjeta.</span>}
+            </div>
+          )}
+
+          {paso.tipo === 'esperando' && maquina.simular && (
+            <div className="maquina-simulacion" role="group" aria-label="Simulación del pago">
+              <span className="maquina-simulacion-titulo">Máquina simulada · sin cobro real</span>
+              <IonButton expand="block" color="success" onClick={() => void simular('APROBAR')} disabled={simulando}>
+                <IonIcon icon={checkmarkCircleOutline} slot="start" />
+                Simular pago aprobado
+              </IonButton>
+              <IonButton expand="block" fill="outline" color="danger" onClick={() => void simular('RECHAZAR')} disabled={simulando}>
+                <IonIcon icon={closeCircleOutline} slot="start" />
+                Simular rechazo (fondos insuficientes)
+              </IonButton>
             </div>
           )}
 

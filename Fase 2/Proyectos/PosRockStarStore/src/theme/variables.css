@@ -451,6 +451,24 @@ http://ionicframework.com/docs/theming/ */
   font-size: 0.8rem;
 }
 
+/* Botones para aprobar o rechazar un cobro de una maquina simulada */
+.maquina-simulacion {
+  margin: 4px 0 12px;
+  padding: 10px 12px 4px;
+  border: 1px dashed var(--ion-color-warning);
+  border-radius: 12px;
+}
+
+.maquina-simulacion-titulo {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ion-color-warning);
+}
+
 /* Barra de escaneo: pistola USB, codigo a mano o camara */
 .scan-bar {
   display: flex;

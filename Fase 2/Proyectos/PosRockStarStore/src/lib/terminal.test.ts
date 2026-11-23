@@ -6,6 +6,8 @@ import {
   esperarResultado,
   guardarConfigMaquina,
   leerConfigMaquina,
+  maquinaDeConfig,
+  maquinaEnLaCaja,
   maquinaHttp,
   maquinaMercadoPago,
   partesTerminal,
@@ -112,6 +114,62 @@ describe('maquinaHttp', () => {
     const aprobado = cobro({ estado: 'APROBADO', codigoAutorizacion: '123456' });
     const maquina = maquinaHttp('m:1', vi.fn().mockResolvedValue(respuesta(409, { codigo: 'ESTADO_INVALIDO', mensaje: 'Ya aprobado', detalle: aprobado })));
     await expect(maquina.cancelar('c1')).resolves.toEqual(aprobado);
+  });
+});
+
+describe('simulacion del pago', () => {
+  it('la maquina de prueba en la red recibe la misma orden que sus botones de aprobar y rechazar', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respuesta(200, cobro({ estado: 'APROBADO' })));
+    const maquina = maquinaHttp('192.168.1.50:8090', fetchMock);
+    await maquina.simular!('c1', 'APROBAR');
+    await maquina.simular!('c1', 'RECHAZAR');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://192.168.1.50:8090/api/cobros/c1/aprobar');
+    expect(fetchMock.mock.calls[1][0]).toBe('http://192.168.1.50:8090/api/cobros/c1/rechazar');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ codigo: 'insufficient_amount' });
+  });
+
+  it('la maquina de la caja aprueba con codigo de autorizacion y ultimos digitos validos para la venta', async () => {
+    const maquina = maquinaEnLaCaja();
+    const pendiente = await maquina.cobrar(15990, 'DEBITO', 'clave-1');
+    expect(pendiente.estado).toBe('PENDIENTE');
+    await maquina.simular!(pendiente.id, 'APROBAR');
+    const aprobado = await esperarResultado(maquina, pendiente.id, { intervaloMs: 1 });
+    expect(aprobado.estado).toBe('APROBADO');
+    const pago = pagoParaVenta(aprobado);
+    // Las mismas reglas con que el backend valida el pago de la maquina.
+    expect(pago.idCobro).toMatch(/^[\w-]{1,100}$/);
+    expect(pago.codigoAutorizacion).toMatch(/^[A-Za-z0-9]{1,32}$/);
+    expect(pago.ultimosDigitos).toMatch(/^\d{4}$/);
+  });
+
+  it('la maquina de la caja rechaza, cancela y no acepta dos cobros a la vez', async () => {
+    const maquina = maquinaEnLaCaja();
+    const primero = await maquina.cobrar(1000, 'CREDITO', 'a');
+    await expect(maquina.cobrar(2000, 'DEBITO', 'b')).rejects.toMatchObject({ codigo: 'OCUPADA' });
+    await maquina.simular!(primero.id, 'RECHAZAR');
+    expect(await maquina.consultar(primero.id)).toMatchObject({ estado: 'RECHAZADO', codigo: 'insufficient_amount' });
+    await expect(maquina.simular!(primero.id, 'APROBAR')).rejects.toMatchObject({ codigo: 'ESTADO_INVALIDO' });
+    const segundo = await maquina.cobrar(2000, 'DEBITO', 'b');
+    expect((await maquina.cancelar(segundo.id)).estado).toBe('CANCELADO');
+  });
+
+  it('cancelar un cobro que ya se pago responde el cobro aprobado, como la maquina real', async () => {
+    const maquina = maquinaEnLaCaja();
+    const c = await maquina.cobrar(1000, 'DEBITO', 'a');
+    await maquina.simular!(c.id, 'APROBAR');
+    expect((await maquina.cancelar(c.id)).estado).toBe('APROBADO');
+    expect((await maquina.anular(c.id)).estado).toBe('ANULADO');
+  });
+
+  it('el modo caja usa la misma maquina en todas las ventas y una real no tiene simulacion', () => {
+    const config = { activa: true, modo: 'caja' as const, direccion: 'localhost:8090', terminal: '' };
+    expect(maquinaDeConfig(config, 't')).toBe(maquinaDeConfig(config, 't'));
+    expect(maquinaMercadoPago('t', 'X').simular).toBeUndefined();
+  });
+
+  it('recuerda el modo caja', () => {
+    guardarConfigMaquina({ activa: true, modo: 'caja', direccion: 'localhost:8090', terminal: '' });
+    expect(leerConfigMaquina().modo).toBe('caja');
   });
 });
 

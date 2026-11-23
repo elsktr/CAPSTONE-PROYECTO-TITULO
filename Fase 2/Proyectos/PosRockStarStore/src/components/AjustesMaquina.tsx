@@ -34,8 +34,9 @@ type Terminales = { estado: 'buscando' } | { estado: 'listas'; terminales: Termi
 const mensajeDe = (error: unknown, otro: string) => (error instanceof Error ? error.message : otro);
 
 /**
- * Activa la maquina de cobro de esta caja: la de prueba, que simula una maquina Mercado Pago
- * en la red, o una Mercado Pago Point real, que se activa en modo PDV y se prueba aqui.
+ * Activa la maquina de cobro de esta caja: una simulada dentro del POS, la de prueba, que
+ * simula una maquina Mercado Pago en la red, o una Mercado Pago Point real, que se activa en
+ * modo PDV y se prueba aqui.
  */
 export const AjustesMaquina: React.FC<Props> = ({ isOpen, config, accessToken, onGuardar, onClose }) => {
   const [activa, setActiva] = useState(config.activa);
@@ -141,23 +142,31 @@ export const AjustesMaquina: React.FC<Props> = ({ isOpen, config, accessToken, o
           <IonSegment
             value={modo}
             onIonChange={(e) => {
-              setModo(e.detail.value === 'mercadopago' ? 'mercadopago' : 'prueba');
+              const valor = e.detail.value;
+              setModo(valor === 'mercadopago' || valor === 'caja' ? valor : 'prueba');
               setPrueba(null);
               setAviso(null);
             }}
             className="maquina-modo"
             aria-label="Tipo de máquina"
           >
-            <IonSegmentButton value="prueba">Prueba (simulada)</IonSegmentButton>
+            <IonSegmentButton value="caja">Simulada en la caja</IonSegmentButton>
+            <IonSegmentButton value="prueba">Prueba en la red</IonSegmentButton>
             <IonSegmentButton value="mercadopago">Mercado Pago Point</IonSegmentButton>
           </IonSegment>
 
-          {modo === 'prueba' ? (
+          {modo === 'caja' ? (
+            <p className="ajuste-ayuda">
+              Una máquina simulada dentro de este POS, sin nada que instalar: sirve en el teléfono y en la web publicada. Al cobrar con débito o
+              crédito aparecen los botones <strong>Simular pago aprobado</strong> y <strong>Simular rechazo</strong>. No se cobra dinero: la venta se
+              registra como pagada con tarjeta, con un código de autorización de prueba.
+            </p>
+          ) : modo === 'prueba' ? (
             <>
               <p className="ajuste-ayuda">
-                Simula una máquina Mercado Pago. Desde su pantalla, en <code>{urlBase(direccion || config.direccion)}</code>, se aprueba el pago,
-                se rechaza con cada código de Mercado Pago (fondos insuficientes, tarjeta bloqueada…), se cancela en la máquina o queda sin
-                respuesta.
+                Simula una máquina Mercado Pago en la red. Desde su pantalla, en <code>{urlBase(direccion || config.direccion)}</code>, se aprueba el
+                pago, se rechaza con cada código de Mercado Pago (fondos insuficientes, tarjeta bloqueada…), se cancela en la máquina o queda sin
+                respuesta. También se puede aprobar o rechazar desde este POS, con los botones de simulación del cobro.
               </p>
               <label className="ajuste-campo">
                 <span>Dirección en la red (IP y puerto)</span>
