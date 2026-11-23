@@ -4,6 +4,7 @@ import type { ArticuloCatalogo, BandaCatalogo, ConciertoBanda, GuiaDeTallas, Med
 import { firstValueFrom } from 'rxjs';
 
 import { API_URL, errorMessage } from '../core/api';
+import { compareCategories } from '../data/categorias';
 import { Product, compareSizes, discountPercent, isWithinNextYear, toProduct } from '../data/models';
 
 export interface CartItem extends Product {
@@ -48,6 +49,14 @@ export interface TourShirt {
   place: string | null;
 }
 
+/** Banda que viene a Chile, con su foto, para el fondo del cartel de la portada. */
+export interface TourBand {
+  name: string;
+  image: string;
+  /** Autor y licencia de la foto, que se muestran junto a ella. */
+  credit: string | null;
+}
+
 /** Categoría cuyas prendas destaca el cartel de la portada. */
 const SHIRTS_CATEGORY = 'Poleras';
 
@@ -87,8 +96,8 @@ export class ProductsService {
   /** Guía de tallas de cada categoría: cuánto mide cada talla, por nombre de categoría. */
   private readonly sizeGuides = signal(new Map<string, MedidaDeTalla[]>());
 
-  /** Categorías que tienen al menos una prenda publicada, en orden alfabético. */
-  readonly categories = computed(() => [...new Set(this.productsSig().map((p) => p.category))].sort(byName));
+  /** Categorías que tienen al menos una prenda publicada: Poleras y Polerones primero, luego por nombre. */
+  readonly categories = computed(() => [...new Set(this.productsSig().map((p) => p.category))].sort(compareCategories));
 
   /** El menú de la tienda sale del catálogo: cada categoría con sus tallas y sus bandas. */
   readonly menu = computed<CategoryMenu[]>(() =>
@@ -157,6 +166,22 @@ export class ProductsService {
       });
     }
     return [...shirts.values()].sort((a, b) => a.date.localeCompare(b.date) || byName(a.name, b.name));
+  });
+
+  /**
+   * Bandas de esas poleras que tienen foto, para el fondo del cartel de la portada: una vez
+   * cada una, en el orden de sus conciertos.
+   */
+  readonly tourBands = computed<TourBand[]>(() => {
+    const bands = this.bandInfo();
+    const result = new Map<string, TourBand>();
+    for (const shirt of this.tourShirts()) {
+      const info = bands.get(shirt.band);
+      if (info?.imagenUrl && !result.has(shirt.band)) {
+        result.set(shirt.band, { name: shirt.band, image: info.imagenUrl, credit: info.credito });
+      }
+    }
+    return [...result.values()];
   });
 
   /** Bandas con prendas publicadas, en orden alfabético. `category` las limita a las de esa categoría. */

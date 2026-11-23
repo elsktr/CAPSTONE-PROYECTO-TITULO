@@ -1,11 +1,11 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { IonContent, IonButton, IonIcon, IonGrid, IonRow, IonCol, ModalController } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
 import { addOutline, bodyOutline } from 'ionicons/icons';
-import { ProductsService } from '../../services/products.service';
+import { ProductsService, TourBand } from '../../services/products.service';
 import { CartService } from '../../services/cart.service';
 import { ToastService } from '../../services/toast.service';
 import { AuthService } from '../../services/auth.service';
@@ -14,22 +14,44 @@ import { Product, discountPercent, formatCLP, formatDay, usePlaceholder } from '
 import { cleanQuery, matchesQuery } from '../../data/search';
 import { tipoDePrenda } from '../../data/probador';
 import { ProbadorComponent, PruebaDePrenda } from '../../components/probador.component';
+import { SiteFooterComponent } from '../../components/site-footer.component';
+import { categoryDescription, categoryKinds } from '../../data/categorias';
 
 /** Productos que la portada muestra de cada categoría; el resto se ve entrando a ella. */
 const PRODUCTS_PER_CATEGORY = 4;
 
+/** Lo que tarda en desvanecerse la foto de fondo del cartel; igual a su transición en el CSS. */
+const BG_FADE_MS = 450;
+
 @Component({
   selector: 'app-shop',
   standalone: true,
-  imports: [CommonModule, RouterLink, IonContent, IonButton, IonIcon, IonGrid, IonRow, IonCol, OffersCarouselComponent],
+  imports: [CommonModule, RouterLink, IonContent, IonButton, IonIcon, IonGrid, IonRow, IonCol, OffersCarouselComponent, SiteFooterComponent],
   template: `
     <ion-content class="rockstar-content" [fullscreen]="true">
       <!-- Hero: solo en la portada, sin filtros -->
       <div class="hero" [class.with-tour]="products.tourShirts().length > 0" *ngIf="!hasFilters()">
+        <!-- Fondo: la foto de una banda que viene a Chile. Un clic la desvanece y aparece la siguiente. -->
+        <ng-container *ngIf="currentBand() as band">
+          <button
+            type="button"
+            class="hero-bg"
+            [class.hidden]="bgHidden()"
+            [style.background-image]="'url(' + band.image + ')'"
+            [attr.aria-label]="'Foto de ' + band.name + '. Cambiar de banda'"
+            (click)="nextBand()"
+          ></button>
+          <div class="hero-shade"></div>
+          <div class="hero-credit" [class.hidden]="bgHidden()">{{ band.name }}{{ band.credit ? ' · ' + band.credit : '' }}</div>
+        </ng-container>
         <div class="hero-glow"></div>
         <div class="hero-content">
           <div class="section-title">Nueva colección · 2026</div>
-          <h1 class="hero-title">Viste el <span class="text-accent">ruido.</span></h1>
+          <h1 class="hero-logo">
+            <span class="brand-logo hero-logo-mark" aria-hidden="true">♠</span>
+            <!-- Guion que no se corta (U+2011): el logo parte en dos renglones solo en el espacio. -->
+            <span class="static-text" data-text="Rockstar e‑commerce">Rockstar <span class="text-accent">e‑commerce</span></span>
+          </h1>
           <p class="hero-subtitle">
             Poleras, chaquetas y polerones para quienes prefieren guitarras
             pesadas, amplificadores al máximo y cero compromisos.
@@ -72,9 +94,23 @@ const PRODUCTS_PER_CATEGORY = 4;
       <!-- Portada: una sección por categoría, con unos pocos productos y el enlace a todos -->
       <ng-container *ngIf="!hasFilters()">
         <section class="category" *ngFor="let section of sections()">
-          <div class="category-head">
-            <h2>{{ section.name }}</h2>
-            <a class="clear" routerLink="/shop" [queryParams]="{ categoria: section.name }">Ver todos ({{ section.total }})</a>
+          <!-- Tarjeta que abre la categoría: qué tipos tiene, de qué se trata y su prenda más barata. -->
+          <div class="category-banner">
+            <div class="banner-text">
+              <div class="section-title">Categoría</div>
+              <h2>{{ section.name }}</h2>
+              <p class="banner-desc">{{ section.description }}</p>
+              <ul class="kinds" *ngIf="section.kinds.length > 0" [attr.aria-label]="'Tipos de ' + section.name">
+                <li *ngFor="let kind of section.kinds">{{ kind }}</li>
+              </ul>
+              <a class="see-all" routerLink="/shop" [queryParams]="{ categoria: section.name }">
+                Ver {{ section.total === 1 ? 'el producto' : 'los ' + section.total + ' productos' }} →
+              </a>
+            </div>
+            <div class="banner-pick" *ngIf="section.cheapest as cheapest">
+              <div class="pick-label">Desde {{ formatCLP(cheapest.price) }}</div>
+              <ng-container *ngTemplateOutlet="card; context: { $implicit: cheapest }"></ng-container>
+            </div>
           </div>
           <ion-grid class="products-grid">
             <ion-row>
@@ -149,7 +185,10 @@ const PRODUCTS_PER_CATEGORY = 4;
       </div>
       <div class="empty" *ngIf="!products.error() && filtered().length === 0">
         <p>{{ products.loaded() ? 'No se encontraron productos.' : 'Cargando la tienda…' }}</p>
-      </div>    </ion-content>
+      </div>
+
+      <app-site-footer [categories]="products.categories()"></app-site-footer>
+    </ion-content>
   `,
   styles: [`
     .hero {
@@ -171,15 +210,109 @@ const PRODUCTS_PER_CATEGORY = 4;
       border-radius: 50%;
       filter: blur(60px);
     }
-    .hero-content { position: relative; max-width: 600px; }
-    .hero-title {
-      margin: 0;
-      font-size: 36px;
-      font-weight: 900;
-      text-transform: uppercase;
-      line-height: 1;
+    /* Foto de la banda: cubre el cartel, detrás del texto y de las poleras. */
+    .hero-bg {
+      position: absolute; inset: 0; z-index: 0;
+      padding: 0; border: 0; margin: 0;
+      background-color: transparent; background-size: cover; background-position: center 30%;
+      cursor: pointer;
+      filter: grayscale(0.35) contrast(1.1);
+      opacity: 0.55;
+      transform: scale(1);
+      transition: opacity 0.45s ease, transform 0.45s ease, filter 0.45s ease;
     }
-    @media (min-width: 640px) { .hero-title { font-size: 56px; } }
+    .hero-bg.hidden { opacity: 0; transform: scale(1.06); filter: grayscale(1) blur(6px) contrast(1.1); }
+    .hero-bg:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+    /* Oscurece la foto hacia el texto para que se siga leyendo. */
+    .hero-shade {
+      position: absolute; inset: 0; z-index: 0; pointer-events: none;
+      background:
+        linear-gradient(90deg, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.55) 55%, rgba(0, 0, 0, 0.35) 100%),
+        linear-gradient(0deg, rgba(0, 0, 0, 0.7), transparent 45%);
+    }
+    .hero-credit {
+      position: absolute; right: 12px; bottom: 8px; z-index: 1; pointer-events: none;
+      max-width: calc(100% - 24px);
+      font-size: 9px; color: rgba(255, 255, 255, 0.55);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      transition: opacity 0.45s ease;
+    }
+    .hero-credit.hidden { opacity: 0; }
+    .hero-glow { z-index: 0; pointer-events: none; }
+    /* El texto deja pasar el clic a la foto; las poleras siguen siendo enlaces. */
+    .hero-content { position: relative; z-index: 1; max-width: 600px; pointer-events: none; }
+    .tour { z-index: 1; }
+
+    /* Logo de la tienda con estática de televisor. */
+    .hero-logo {
+      margin: 0;
+      display: flex; align-items: center; gap: 14px;
+      font-size: 32px; font-weight: 900; text-transform: uppercase; line-height: 1; letter-spacing: 0.04em;
+      animation: tv-jitter 3.2s steps(1) infinite;
+    }
+    @media (min-width: 640px) { .hero-logo { font-size: 50px; gap: 18px; } }
+    .hero-logo-mark { flex: none; width: 1.2em; height: 1.2em; font-size: 0.6em; position: relative; overflow: hidden; }
+    .hero-logo-mark::after { animation: tv-noise 0.35s steps(4) infinite; }
+    .hero-logo-mark::after {
+      content: ''; position: absolute; inset: 0;
+      background-image: var(--tv-noise); background-size: 120px 120px;
+      mix-blend-mode: overlay; opacity: 0.7;
+    }
+    .static-text {
+      position: relative; display: inline-block;
+      text-shadow: -2px 0 rgba(0, 220, 255, 0.55), 2px 0 rgba(255, 30, 60, 0.55);
+    }
+    /*
+     * La misma palabra dos veces encima, recortada a las letras: así el efecto queda solo
+     * dentro de ellas. Una capa lleva la nieve y las líneas de barrido; la otra, la franja
+     * clara que sube, como en una pantalla de tubo.
+     */
+    .static-text::before, .static-text::after {
+      content: attr(data-text);
+      position: absolute; inset: 0; pointer-events: none;
+      color: transparent; text-shadow: none;
+      -webkit-background-clip: text; background-clip: text;
+    }
+    .static-text::after {
+      background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.55) 0 1px, transparent 1px 3px), var(--tv-noise);
+      background-size: auto, 120px 120px;
+      /* Overlay aclara y oscurece la letra sin taparle el color: "e-commerce" sigue rojo. */
+      mix-blend-mode: overlay;
+      opacity: 0.95;
+      animation: tv-noise 0.35s steps(4) infinite;
+    }
+    .static-text::before {
+      z-index: 1;
+      background-image: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.35) 48%, transparent 58%);
+      background-size: 100% 300%; background-repeat: no-repeat;
+      animation: tv-roll 2.6s linear infinite;
+    }
+    .hero {
+      --tv-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+    @keyframes tv-noise {
+      0% { background-position: 0 0; }
+      25% { background-position: -37px 53px; }
+      50% { background-position: 61px -19px; }
+      75% { background-position: -83px -71px; }
+      100% { background-position: 17px 29px; }
+    }
+    @keyframes tv-roll {
+      from { background-position: 0 100%; }
+      to { background-position: 0 0%; }
+    }
+    /* Casi siempre quieto; de vez en cuando la señal salta y se corre el color. */
+    @keyframes tv-jitter {
+      0%, 100% { transform: none; filter: none; }
+      91% { transform: translate(-3px, 1px) skewX(-6deg); filter: hue-rotate(40deg) contrast(1.4); }
+      93% { transform: translate(4px, -1px) skewX(4deg); filter: none; }
+      95% { transform: translate(-1px, 0); opacity: 0.75; }
+      96% { transform: none; opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .hero-logo, .static-text::before, .static-text::after, .hero-logo-mark::after { animation: none; }
+      .hero-bg, .hero-credit { transition: none; }
+    }
     .hero-subtitle {
       margin: 16px 0 0;
       font-size: 14px;
@@ -234,8 +367,47 @@ const PRODUCTS_PER_CATEGORY = 4;
     }
     .clear:hover { border-color: var(--accent); color: #fff; }
     .products-grid { padding: 16px; }
-    .category-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 24px 16px 0; }
-    .category-head h2 { margin: 0; font-size: 20px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; }
+    /* Tarjeta grande que separa una categoría de la siguiente. */
+    .category-banner {
+      position: relative; overflow: hidden;
+      display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: center;
+      margin: 28px 16px 0; padding: 24px;
+      border: 1px solid var(--border); border-radius: 24px;
+      background:
+        radial-gradient(circle at 100% 0%, rgba(185, 28, 28, 0.22), transparent 55%),
+        linear-gradient(135deg, #111113, #0a0a0b 60%, #000);
+    }
+    .category-banner::before {
+      content: ''; position: absolute; left: 0; top: 24px; bottom: 24px; width: 4px;
+      border-radius: 0 4px 4px 0; background: var(--accent);
+    }
+    @media (min-width: 720px) {
+      .category-banner { grid-template-columns: minmax(0, 1fr) 220px; gap: 32px; padding: 28px 32px; }
+    }
+    .banner-text .section-title { font-size: 11px; margin-bottom: 6px; }
+    .banner-text h2 {
+      margin: 0; font-size: 34px; font-weight: 900; text-transform: uppercase; line-height: 1; letter-spacing: 0.02em;
+    }
+    @media (min-width: 640px) { .banner-text h2 { font-size: 46px; } }
+    .banner-desc { margin: 12px 0 0; max-width: 560px; font-size: 14px; line-height: 1.6; color: var(--text-muted); }
+    .kinds { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
+    .kinds li {
+      padding: 5px 12px; border-radius: 999px;
+      border: 1px solid rgba(220, 38, 38, 0.45); background: rgba(185, 28, 28, 0.12);
+      font-size: 12px; font-weight: 700; color: #fecaca;
+    }
+    .see-all {
+      display: inline-block; margin-top: 18px;
+      font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;
+      color: #fff; text-decoration: none; border-bottom: 2px solid var(--accent); padding-bottom: 2px;
+    }
+    .see-all:hover, .see-all:focus-visible { color: var(--accent-hover); outline: none; }
+    .banner-pick { width: 100%; max-width: 240px; justify-self: center; }
+    @media (min-width: 720px) { .banner-pick { justify-self: end; } }
+    .pick-label {
+      margin-bottom: 8px; text-align: center;
+      font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.2em; color: var(--accent);
+    }
     .category .products-grid { padding-top: 8px; padding-bottom: 0; }
     .category:last-of-type { padding-bottom: 16px; }
     .product-card {
@@ -376,6 +548,28 @@ export class ShopPage {
     );
   });
 
+  /** Cuál de las bandas que vienen a Chile está de fondo en el cartel. */
+  private readonly bandIndex = signal(0);
+  /** Mientras la foto se desvanece para dar paso a la siguiente. */
+  readonly bgHidden = signal(false);
+  private bgTimer: ReturnType<typeof setTimeout> | null = null;
+
+  currentBand = computed<TourBand | null>(() => {
+    const bands = this.products.tourBands();
+    return bands.length > 0 ? bands[this.bandIndex() % bands.length] : null;
+  });
+
+  /** Desvanece la foto y, ya oculta, la cambia por la de la banda siguiente (o la misma, si es una sola). */
+  nextBand(): void {
+    if (this.bgTimer !== null) return;
+    this.bgHidden.set(true);
+    this.bgTimer = setTimeout(() => {
+      this.bandIndex.update((i) => i + 1);
+      this.bgHidden.set(false);
+      this.bgTimer = null;
+    }, BG_FADE_MS);
+  }
+
   private readonly modales = inject(ModalController);
 
   sePuedeProbar(p: Product): boolean {
@@ -410,12 +604,25 @@ export class ShopPage {
       const all = [...shown.values()];
       const available = all.filter((p) => p.stock > 0);
       const soldOut = all.filter((p) => p.stock <= 0);
-      return { name, total: all.length, products: [...available, ...soldOut].slice(0, PRODUCTS_PER_CATEGORY) };
+      // La prenda más barata que se puede comprar; con el mismo precio, la de nombre primero.
+      const cheapest =
+        [...available].sort((a, b) => a.price - b.price || a.name.localeCompare(b.name, 'es'))[0] ?? null;
+      return {
+        name,
+        total: all.length,
+        products: [...available, ...soldOut].slice(0, PRODUCTS_PER_CATEGORY),
+        cheapest,
+        description: categoryDescription(name),
+        kinds: categoryKinds(name, all),
+      };
     }),
   );
 
   constructor() {
     addIcons({ 'add-outline': addOutline, 'body-outline': bodyOutline });
+    inject(DestroyRef).onDestroy(() => {
+      if (this.bgTimer !== null) clearTimeout(this.bgTimer);
+    });
     // La disponibilidad cambia con cada venta: el catálogo se pide cada vez que se entra a la tienda.
     void this.products.load();
   }
