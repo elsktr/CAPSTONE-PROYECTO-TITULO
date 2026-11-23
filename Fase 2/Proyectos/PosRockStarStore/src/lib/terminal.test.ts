@@ -7,6 +7,8 @@ import {
   guardarConfigMaquina,
   leerConfigMaquina,
   maquinaHttp,
+  maquinaMercadoPago,
+  partesTerminal,
   pagoParaVenta,
   tipoTarjeta,
   ultimosDigitos,
@@ -25,7 +27,8 @@ const cobro = (datos: Partial<CobroMaquina> = {}): CobroMaquina => ({
   ...datos,
 });
 
-const respuesta = (status: number, cuerpo: unknown) => ({ ok: status < 400, status, json: async () => cuerpo }) as Response;
+const respuesta = (status: number, cuerpo: unknown) =>
+  ({ ok: status < 400, status, json: async () => cuerpo, text: async () => JSON.stringify(cuerpo) }) as Response;
 
 describe('urlBase', () => {
   it('agrega http y quita la barra final', () => {
@@ -63,10 +66,16 @@ describe('pago para la venta', () => {
 describe('configuracion', () => {
   beforeEach(() => localStorage.clear());
 
-  it('parte desactivada y recuerda lo guardado', () => {
-    expect(leerConfigMaquina()).toEqual({ activa: false, direccion: 'localhost:8090' });
-    guardarConfigMaquina({ activa: true, direccion: '192.168.1.50:8090' });
-    expect(leerConfigMaquina()).toEqual({ activa: true, direccion: '192.168.1.50:8090' });
+  it('parte desactivada, en modo prueba, y recuerda lo guardado', () => {
+    expect(leerConfigMaquina()).toEqual({ activa: false, modo: 'prueba', direccion: 'localhost:8090', terminal: '' });
+    const mercadoPago = { activa: true, modo: 'mercadopago' as const, direccion: '192.168.1.50:8090', terminal: 'NEWLAND_N950__SBX0000001' };
+    guardarConfigMaquina(mercadoPago);
+    expect(leerConfigMaquina()).toEqual(mercadoPago);
+  });
+
+  it('una configuracion de antes de los modos queda como maquina de prueba', () => {
+    localStorage.setItem('pos_maquina_cobro', JSON.stringify({ activa: true, direccion: '192.168.1.50:8090' }));
+    expect(leerConfigMaquina()).toEqual({ activa: true, modo: 'prueba', direccion: '192.168.1.50:8090', terminal: '' });
   });
 
   it('ignora una configuracion danada', () => {
@@ -138,5 +147,47 @@ describe('esperarResultado', () => {
       return cobro();
     });
     await expect(esperarResultado(maquinaCon(consultar), 'c1', { intervaloMs: 1, senal: control.signal })).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+describe('maquinaMercadoPago', () => {
+  const TERMINAL = 'NEWLAND_N950__N950NCB123456789';
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('separa el modelo y la serie de la maquina', () => {
+    expect(partesTerminal(TERMINAL)).toEqual({ modelo: 'NEWLAND N950', serie: 'N950NCB123456789' });
+  });
+
+  it('cobra a traves de la API con la sesion del vendedor y consulta cada 2 segundos', async () => {
+    fetchMock.mockResolvedValue(respuesta(201, cobro({ id: 'ORD01' })));
+    const maquina = maquinaMercadoPago('token-vendedor', TERMINAL);
+
+    await maquina.cobrar(15990, 'CREDITO', 'clave-1');
+
+    const [url, opciones] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/pagos\/point\/cobros$/);
+    expect(opciones.headers.Authorization).toBe('Bearer token-vendedor');
+    expect(JSON.parse(opciones.body)).toEqual({ terminal: TERMINAL, monto: 15990, tipo: 'CREDITO', referencia: 'clave-1' });
+    expect(maquina.intervaloMs).toBe(2000);
+  });
+
+  it('la prueba de conexion exige que la maquina este en modo PDV', async () => {
+    fetchMock.mockResolvedValue(respuesta(200, [{ id: TERMINAL, modo: 'STANDALONE' }]));
+    await expect(maquinaMercadoPago('t', TERMINAL).info()).rejects.toMatchObject({ codigo: 'NO_PDV' });
+
+    fetchMock.mockResolvedValue(respuesta(200, [{ id: TERMINAL, modo: 'PDV' }]));
+    await expect(maquinaMercadoPago('t', TERMINAL).info()).resolves.toEqual({ nombre: 'Mercado Pago Point', modelo: 'NEWLAND N950', serie: 'N950NCB123456789' });
+  });
+
+  it('entrega los errores de la API como errores de la maquina, con su codigo', async () => {
+    fetchMock.mockResolvedValue(respuesta(503, { codigo: 'MERCADOPAGO_NO_CONFIGURADO', mensaje: 'Falta la cuenta.' }));
+    await expect(maquinaMercadoPago('t', TERMINAL).consultar('ORD01')).rejects.toMatchObject({ codigo: 'MERCADOPAGO_NO_CONFIGURADO', message: 'Falta la cuenta.' });
+
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(maquinaMercadoPago('t', TERMINAL).consultar('ORD01')).rejects.toMatchObject({ codigo: 'SIN_CONEXION' });
   });
 });

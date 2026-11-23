@@ -11,6 +11,7 @@
     "claves": "node scripts/generar-claves.mjs",
     "semilla:bandas": "node scripts/cargar-bandas.mjs",
     "semilla:prendas": "node scripts/cargar-prendas.mjs",
+    "semilla:espacios": "node scripts/ordenar-espacios.mjs",
     "semilla:historial": "node scripts/sembrar-historial.mjs",
     "semilla:historial:quitar": "node scripts/sembrar-historial.mjs --quitar",
     "ventas:ejemplo": "node scripts/generar-ventas-ejemplo.mjs",

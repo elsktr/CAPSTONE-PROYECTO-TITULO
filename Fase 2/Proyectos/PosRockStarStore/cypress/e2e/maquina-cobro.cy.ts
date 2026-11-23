@@ -96,7 +96,12 @@ describe('POS - Máquina de cobro', () => {
 
     cy.get('.maquina-chip.activa').should('contain', 'Máquina de cobro activa');
     cy.window().then((win) => {
-      expect(JSON.parse(win.localStorage.getItem('pos_maquina_cobro') || '{}')).to.deep.equal({ activa: true, direccion: 'localhost:8099' });
+      expect(JSON.parse(win.localStorage.getItem('pos_maquina_cobro') || '{}')).to.deep.equal({
+        activa: true,
+        modo: 'prueba',
+        direccion: 'localhost:8099',
+        terminal: '',
+      });
     });
   });
 

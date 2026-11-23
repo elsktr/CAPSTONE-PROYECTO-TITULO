@@ -404,6 +404,54 @@ describe('edición de productos', () => {
     expect((await editar(polera.idVariante, { categoria: 'Pantalones' })).cuerpo.codigoUbicacion).toBe(cuerpo.codigoUbicacion);
   });
 
+  it('guarda varios modelos en un mismo espacio, con todas sus tallas', async () => {
+    const trooper = await crearProducto({ banda: 'Iron Maiden', talla: 'S' });
+    const trooperXl = await crearProducto({ nombre: trooper.producto, talla: 'XL' });
+    const killers = await crearProducto({ banda: 'Iron Maiden', talla: 'M' });
+    expect(trooper.codigoUbicacion).not.toBe(killers.codigoUbicacion);
+
+    const { status, cuerpo } = await editar(trooper.idVariante, { espacio: killers.codigoUbicacion.toLowerCase() });
+
+    expect(status).toBe(200);
+    expect(cuerpo.codigoUbicacion).toBe(killers.codigoUbicacion);
+    // El producto se mueve entero: su otra talla también pasa al espacio.
+    expect((await obtener<VarianteStock>(`/inventario/variantes/por-codigo/${trooperXl.sku}`)).cuerpo.codigoUbicacion).toBe(killers.codigoUbicacion);
+    const delEspacio = (await obtener<VarianteStock[]>(`/inventario/variantes?q=${killers.codigoUbicacion}`)).cuerpo.filter(
+      (v) => v.codigoUbicacion === killers.codigoUbicacion,
+    );
+    expect(delEspacio.map((v) => v.sku).sort()).toEqual([trooper.sku, trooperXl.sku, killers.sku].sort());
+  });
+
+  it('un espacio nuevo de la zona queda reservado y no se entrega a otro producto', async () => {
+    const polera = await crearProducto();
+    const numero = Number(polera.codigoUbicacion.split('-')[2]) + 5;
+
+    expect((await editar(polera.idVariante, { espacio: `B-POL-${numero}` })).cuerpo.codigoUbicacion).toBe(`B-POL-${numero}`);
+
+    expect((await crearProducto()).codigoUbicacion).toBe(`B-POL-${numero + 1}`);
+  });
+
+  it('no guarda un producto en la zona de otra categoría ni en un código mal escrito', async () => {
+    const polera = await crearProducto();
+
+    expect(await editar<ErrorApi>(polera.idVariante, { espacio: 'B-PAN-01' })).toEqual({
+      status: 400,
+      cuerpo: { codigo: 'DATOS_INVALIDOS', mensaje: 'Los productos de Poleras se guardan en los espacios B-POL: no en la zona PAN.' },
+    });
+    expect((await editar<ErrorApi>(polera.idVariante, { espacio: 'repisa 3' })).cuerpo.mensaje).toBe(
+      'El espacio no es válido: debe tener la forma B-POL-03.',
+    );
+    expect((await obtener<VarianteStock>(`/inventario/variantes/por-codigo/${polera.sku}`)).cuerpo.codigoUbicacion).toBe(polera.codigoUbicacion);
+  });
+
+  it('al cambiar de categoría junto con el espacio, queda en el espacio pedido', async () => {
+    const polera = await crearProducto({ talla: `T${randomUUID().slice(0, 6)}` });
+
+    const { cuerpo } = await editar(polera.idVariante, { categoria: 'Pantalones', espacio: 'B-PAN-01' });
+
+    expect(cuerpo).toMatchObject({ categoria: 'Pantalones', codigoUbicacion: 'B-PAN-01' });
+  });
+
   it('no admite el nombre de otro producto ni una talla y color que el producto ya tiene', async () => {
     const uno = await crearProducto({ talla: 'M' });
     const otro = await crearProducto({ talla: 'M' });

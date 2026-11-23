@@ -3,7 +3,7 @@ import type { VarianteStock } from '@rockstar/contracts';
 
 import { ImpresionService } from '../../shared/impresion.service';
 import { EntornoDePrueba, configurarEntorno } from '../../testing/entorno';
-import { agruparEspacios, esCodigoDeEspacio, filtrarEspacios } from './espacios';
+import { agruparEspacios, compararTallas, contenidoDeEspacio, esCodigoDeEspacio, filtrarEspacios, resumenDeEspacio } from './espacios';
 import { EspaciosPage } from './espacios.page';
 
 function variante(datos: Partial<VarianteStock> & { codigoUbicacion: string }): VarianteStock {
@@ -52,7 +52,7 @@ describe('espacios de bodega', () => {
         codigo: 'B-POL-01',
         zona: 'POL',
         numero: '01',
-        producto: 'Polera Calavera',
+        productos: ['Polera Calavera'],
         categoria: 'Poleras',
         banda: 'Misfits',
         imagenUrl: null,
@@ -61,6 +61,50 @@ describe('espacios de bodega', () => {
         unidadesEnBodega: 20,
       },
     ]);
+  });
+
+  it('un espacio puede guardar varios productos: los nombra a todos y conserva la banda si es común', () => {
+    const [maiden] = agruparEspacios([
+      variante({ codigoUbicacion: 'B-POL-05', producto: 'Polera Trooper', banda: 'Iron Maiden', existencias: enBodega(4) }),
+      variante({ codigoUbicacion: 'B-POL-05', producto: 'Polera Killers', banda: 'Iron Maiden', existencias: enBodega(6) }),
+    ]);
+    expect(maiden).toMatchObject({ productos: ['Polera Killers', 'Polera Trooper'], banda: 'Iron Maiden', unidadesEnBodega: 10 });
+    expect(resumenDeEspacio(maiden!)).toBe('Iron Maiden · 2 modelos');
+
+    const [mezclado] = agruparEspacios([
+      variante({ codigoUbicacion: 'B-POL-06', producto: 'Polera Eddie', banda: 'Iron Maiden' }),
+      variante({ codigoUbicacion: 'B-POL-06', producto: 'Polera Rayo', banda: 'AC/DC' }),
+    ]);
+    expect(mezclado!.banda).toBeNull();
+    expect(resumenDeEspacio(mezclado!)).toBe('2 modelos');
+    expect(resumenDeEspacio(agruparEspacios([variante({ codigoUbicacion: 'B-POL-07' })])[0]!)).toBe('Polera Calavera');
+  });
+
+  it('muestra lo que guarda un espacio por modelo, con sus tallas de la S a la XL', () => {
+    const variantes = [
+      variante({ idVariante: 1, codigoUbicacion: 'B-POL-05', producto: 'Polera Trooper', talla: 'XL', existencias: enBodega(2) }),
+      variante({ idVariante: 2, codigoUbicacion: 'B-POL-05', producto: 'Polera Trooper', talla: 'S', existencias: enBodega(3) }),
+      variante({ idVariante: 3, codigoUbicacion: 'B-POL-05', producto: 'Polera Trooper', talla: 'M', existencias: enBodega(0, 2) }),
+      variante({ idVariante: 4, codigoUbicacion: 'B-POL-05', producto: 'Polera Trooper', talla: 'L', existencias: enBodega(5) }),
+      variante({ idVariante: 5, codigoUbicacion: 'B-POL-05', producto: 'Polera Killers', talla: 'M', color: 'Blanco', existencias: enBodega(1) }),
+      variante({ idVariante: 6, codigoUbicacion: 'B-POL-05', producto: 'Polera Killers', talla: 'M', color: 'Negro', existencias: enBodega(4) }),
+      // Otro espacio cuyo código empieza igual no se mezcla.
+      variante({ idVariante: 7, codigoUbicacion: 'B-POL-050', producto: 'Polera Otra' }),
+    ];
+
+    const modelos = contenidoDeEspacio(variantes, 'b-pol-05');
+
+    expect(modelos.map((m) => `${m.producto} ${m.color}: ${m.tallas.map((t) => `${t.talla}=${t.enBodega}`).join(' ')} (${m.unidadesEnBodega})`)).toEqual([
+      'Polera Killers Blanco: M=1 (1)',
+      'Polera Killers Negro: M=4 (4)',
+      // Las unidades de la sala de ventas no están en el espacio: la M figura agotada.
+      'Polera Trooper Negro: S=3 M=0 L=5 XL=2 (10)',
+    ]);
+    expect(contenidoDeEspacio(variantes, 'B-POL-99')).toEqual([]);
+  });
+
+  it('ordena las tallas de letras y las numéricas', () => {
+    expect(['XL', '42', 'S', 'Única', 'XXL', '38', 'M', 'XS'].sort(compararTallas)).toEqual(['XS', 'S', 'M', 'XL', 'XXL', '38', '42', 'Única']);
   });
 
   it('ordena por zona y por número, no como texto', () => {
@@ -104,7 +148,7 @@ describe('EspaciosPage', () => {
   it('lista un espacio por producto, con su código y número', async () => {
     await pagina.cargar();
 
-    expect(pagina.espacios().map((e) => `${e.codigo} ${e.producto}`)).toEqual([
+    expect(pagina.espacios().map((e) => `${e.codigo} ${e.productos.join(', ')}`)).toEqual([
       'B-CHA-01 Chaqueta de Cuero Rider',
       'B-CIN-01 Cinturón Tachas',
       'B-PAN-01 Jeans Rasgado',
@@ -136,20 +180,96 @@ describe('EspaciosPage', () => {
     await pagina.cargar();
     fixture.detectChanges();
 
-    expect(pagina.elegido()).toMatchObject({ codigo: 'B-PAN-01', zona: 'PAN', numero: '01', producto: 'Jeans Rasgado' });
+    expect(pagina.elegido()).toMatchObject({ codigo: 'B-PAN-01', zona: 'PAN', numero: '01', productos: ['Jeans Rasgado'] });
     const etiqueta = (fixture.nativeElement as HTMLElement).querySelector('.detalle .rs-etiqueta')!;
     expect(etiqueta.querySelector('.rs-etiqueta-codigo')!.textContent).toBe('B-PAN-01');
     expect(etiqueta.querySelector('svg')!.getAttribute('aria-label')).toBe('Código QR de B-PAN-01');
   });
 
-  it('el código pedido se atiende una vez: volver a la lista no lo reabre', async () => {
+  it('el código pedido se atiende una vez: volver a la lista no lo reabre, pero otro código sí se abre', async () => {
     fixture.componentRef.setInput('codigo', 'B-PAN-01');
+    fixture.detectChanges();
     await pagina.cargar();
 
-    pagina.codigoElegido.set(null);
+    pagina.volverALaLista();
     await pagina.cargar();
+    fixture.detectChanges();
+    expect(pagina.elegido()).toBeNull();
+
+    fixture.componentRef.setInput('codigo', 'B-CHA-01');
+    fixture.detectChanges();
+    expect(pagina.elegido()?.codigo).toBe('B-CHA-01');
+  });
+
+  it('al escanear la etiqueta de un espacio muestra sus modelos con las tallas', async () => {
+    await pagina.cargar();
+    entorno.escaner.resultado = { estado: 'leido', codigo: 'b-pol-01' };
+
+    await pagina.escanearEspacio();
+    fixture.detectChanges();
+
+    expect(pagina.elegido()?.codigo).toBe('B-POL-01');
+    const modelo = (fixture.nativeElement as HTMLElement).querySelector('.modelo')!;
+    expect(modelo.querySelector('h4')!.textContent).toBe('Polera Calavera');
+    const tallas = [...modelo.querySelectorAll('.tallas li')].map((li) => `${li.querySelector('span')!.textContent} ${li.querySelector('strong')!.textContent}`);
+    expect(tallas).toEqual(['M 12', 'L 8']);
+  });
+
+  it('avisa si lo escaneado no es la etiqueta de un espacio', async () => {
+    await pagina.cargar();
+    entorno.escaner.resultado = { estado: 'leido', codigo: '7800000000003' };
+
+    await pagina.escanearEspacio();
 
     expect(pagina.elegido()).toBeNull();
+    expect(pagina.mensaje()).toBe('7800000000003 no es el código de un espacio: escanea la etiqueta de la repisa.');
+  });
+
+  it('agrega otro producto al espacio, con todas sus tallas', async () => {
+    await pagina.cargar();
+    pagina.abrir('B-POL-01');
+    pagina.empezarAAgregar();
+
+    pagina.proponer(await entorno.variante('RS-0007'));
+    expect(pagina.porMover()?.producto).toBe('Polera Eddie');
+    await pagina.mover(pagina.porMover()!);
+
+    expect(pagina.contenido().map((m) => m.producto)).toEqual(['Polera Calavera', 'Polera Eddie']);
+    expect(pagina.aviso()).toBe('Polera Eddie quedó en B-POL-01.');
+    // El espacio que dejó ya no guarda nada y sale de la lista.
+    expect(pagina.espacios().map((e) => e.codigo)).not.toContain('B-POL-02');
+    expect(pagina.espacios().find((e) => e.codigo === 'B-POL-01')!.productos).toEqual(['Polera Calavera', 'Polera Eddie']);
+  });
+
+  it('no propone mover un producto que ya está en el espacio', async () => {
+    await pagina.cargar();
+    pagina.abrir('B-POL-01');
+
+    pagina.proponer(await entorno.variante('RS-0002'));
+
+    expect(pagina.porMover()).toBeNull();
+    expect(pagina.aviso()).toBe('Polera Calavera ya está en este espacio.');
+  });
+
+  it('no mueve un producto a la zona de otra categoría', async () => {
+    await pagina.cargar();
+    pagina.abrir('B-PAN-01');
+
+    await pagina.mover(await entorno.variante('RS-0007'));
+
+    expect(pagina.mensaje()).toBe('Los productos de Poleras se guardan en los espacios B-POL: no en la zona PAN.');
+    expect(pagina.contenido().map((m) => m.producto)).toEqual(['Jeans Rasgado']);
+  });
+
+  it('abre vacío un espacio nuevo, para guardar ahí un producto', async () => {
+    await pagina.cargar();
+    pagina.abrir('B-POL-09');
+    expect(pagina.elegido()).toMatchObject({ codigo: 'B-POL-09', zona: 'POL', numero: '09', productos: [] });
+
+    await pagina.mover(await entorno.variante('RS-0008'));
+
+    expect(pagina.contenido().map((m) => m.producto)).toEqual(['Polera Rayo']);
+    expect(pagina.elegido()!.productos).toEqual(['Polera Rayo']);
   });
 
   it('imprime la etiqueta del espacio elegido', async () => {
@@ -197,7 +317,7 @@ describe('EspaciosPage', () => {
 
     await pagina.cargar();
 
-    expect(pagina.espacios().find((e) => e.producto === 'Polera Nueva')).toMatchObject({
+    expect(pagina.espacios().find((e) => e.productos.includes('Polera Nueva'))).toMatchObject({
       codigo: 'B-POL-04',
       numero: '04',
       unidadesEnBodega: 5,

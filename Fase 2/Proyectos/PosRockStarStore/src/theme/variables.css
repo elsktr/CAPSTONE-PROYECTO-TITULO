@@ -397,6 +397,60 @@ http://ionicframework.com/docs/theming/ */
   color: var(--ion-color-danger);
 }
 
+.maquina-modo {
+  margin: 4px 0 12px;
+}
+
+.terminales {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.terminal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--ion-color-step-250, #3f3f46);
+  background: var(--ion-item-background);
+}
+
+.terminal.elegida {
+  border-color: var(--ion-color-primary);
+}
+
+.terminal label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.terminal span {
+  overflow-wrap: anywhere;
+}
+
+.terminal .modo {
+  display: block;
+  color: var(--ion-color-warning);
+}
+
+.terminal .modo.pdv {
+  color: var(--ion-color-success);
+}
+
+.maquina-codigo {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
 /* Barra de escaneo: pistola USB, codigo a mano o camara */
 .scan-bar {
   display: flex;

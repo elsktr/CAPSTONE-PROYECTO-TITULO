@@ -33,6 +33,18 @@ export interface Configuracion {
   starken: AmbienteStarken;
   /** Commit que se está ejecutando, si quien despliega lo informa (Render, en `RENDER_GIT_COMMIT`). */
   version?: string;
+  /** Máquinas de cobro Mercado Pago Point del POS. */
+  mercadoPago: ConfiguracionMercadoPago;
+}
+
+export interface ConfiguracionMercadoPago {
+  /**
+   * Access token de la cuenta de Mercado Pago (de prueba o productivo). Sin él, el POS no
+   * puede usar máquinas Point y sigue con la máquina simulada.
+   */
+  accessToken?: string;
+  /** Dirección de la API de Mercado Pago; se cambia solo para probar contra un doble. */
+  url: string;
 }
 
 /**
@@ -136,5 +148,9 @@ export function leerConfiguracion(env: NodeJS.ProcessEnv = process.env): Configu
     webpay: leerWebpay(env),
     starken: leerStarken(env),
     version: env['RENDER_GIT_COMMIT']?.trim() || undefined,
+    mercadoPago: {
+      accessToken: env['MERCADOPAGO_ACCESS_TOKEN']?.trim() || undefined,
+      url: (env['MERCADOPAGO_API_URL']?.trim() || 'https://api.mercadopago.com').replace(/\/+$/, ''),
+    },
   };
 }

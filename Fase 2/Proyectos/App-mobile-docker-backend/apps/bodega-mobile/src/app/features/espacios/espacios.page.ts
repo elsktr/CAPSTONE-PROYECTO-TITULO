@@ -1,4 +1,4 @@
-import { Component, ElementRef, computed, inject, input, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import {
   IonBackButton,
   IonButton,
@@ -14,25 +14,30 @@ import {
 } from '@ionic/angular';
 import type { VarianteStock } from '@rockstar/contracts';
 import { addIcons } from 'ionicons';
-import { printOutline } from 'ionicons/icons';
+import { addCircleOutline, printOutline, scanOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 
 import { mensajeDeError } from '../../core/api/errores';
 import { CodigoQrComponent } from '../../shared/codigo-qr.component';
 import { valorDeEvento } from '../../shared/formato';
+import { ImagenPrendaComponent } from '../../shared/imagen-prenda.component';
 import { ImpresionService } from '../../shared/impresion.service';
+import { BuscadorVarianteComponent } from '../escaner/buscador-variante.component';
+import { EscanerService } from '../escaner/escaner.service';
 import { InventarioApi } from '../inventario/inventario.api';
-import { Espacio, agruparEspacios, filtrarEspacios } from './espacios';
+import { Espacio, agruparEspacios, contenidoDeEspacio, esCodigoDeEspacio, filtrarEspacios, resumenDeEspacio } from './espacios';
 
 /**
  * Espacios de la bodega con su código QR. Cada etiqueta lleva el número del espacio
- * para pegarla en la repisa: al escanearla desde cualquier pantalla de la app se llega
- * a las prendas que se guardan ahí.
+ * para pegarla en la repisa: al escanearla se ven los modelos que se guardan ahí, con
+ * sus tallas, y se pueden agregar otros productos al espacio.
  */
 @Component({
   selector: 'app-espacios',
   imports: [
+    BuscadorVarianteComponent,
     CodigoQrComponent,
+    ImagenPrendaComponent,
     IonBackButton,
     IonButton,
     IonButtons,
@@ -60,7 +65,7 @@ import { Espacio, agruparEspacios, filtrarEspacios } from './espacios';
           <div #etiqueta class="rs-etiqueta">
             <app-codigo-qr [texto]="espacio.codigo" style="--tamano: 220px"></app-codigo-qr>
             <p class="rs-etiqueta-codigo">{{ espacio.codigo }}</p>
-            <p class="rs-etiqueta-producto">{{ espacio.producto }}</p>
+            <p class="rs-etiqueta-producto">{{ resumen(espacio) }}</p>
           </div>
         </div>
         <dl class="rs-datos datos">
@@ -73,26 +78,97 @@ import { Espacio, agruparEspacios, filtrarEspacios } from './espacios';
             <dd>{{ espacio.numero }}</dd>
           </div>
           <div>
-            <dt>Tallas y colores</dt>
-            <dd>{{ espacio.variantes }}</dd>
+            <dt>Modelos</dt>
+            <dd>{{ contenido().length }}</dd>
           </div>
           <div>
             <dt>Unidades en bodega</dt>
             <dd>{{ espacio.unidadesEnBodega }}</dd>
           </div>
         </dl>
+
+        <h3 class="titulo-seccion">Guardado en este espacio</h3>
+        @for (modelo of contenido(); track modelo.producto + modelo.color) {
+          <ion-card class="modelo">
+            <div class="modelo-fila">
+              <app-imagen-prenda [url]="modelo.imagenUrl" [alt]="modelo.producto" style="--tamano: 72px"></app-imagen-prenda>
+              <div class="modelo-datos">
+                <h4>{{ modelo.producto }}</h4>
+                <p class="tenue">
+                  @if (modelo.banda) {
+                    {{ modelo.banda }} ·
+                  }
+                  {{ modelo.color }} · {{ modelo.unidadesEnBodega }} en bodega
+                </p>
+                <ul class="tallas" [attr.aria-label]="'Tallas de ' + modelo.producto">
+                  @for (talla of modelo.tallas; track talla.variante.idVariante) {
+                    <li [class.agotada]="talla.enBodega === 0" [attr.title]="talla.variante.sku">
+                      <span>{{ talla.talla }}</span>
+                      <strong>{{ talla.enBodega }}</strong>
+                    </li>
+                  }
+                </ul>
+              </div>
+            </div>
+          </ion-card>
+        } @empty {
+          <p class="rs-ayuda vacio">Este espacio aún no guarda productos.</p>
+        }
+
+        <div class="rs-acciones">
+          @if (agregando()) {
+            <p class="rs-ayuda">
+              Escanea la etiqueta de una prenda o búscala. Su producto pasa a {{ espacio.codigo }} con todas sus tallas.
+            </p>
+          } @else {
+            <ion-button expand="block" (click)="empezarAAgregar()">
+              <ion-icon slot="start" name="add-circle-outline" aria-hidden="true"></ion-icon>
+              Agregar producto a este espacio
+            </ion-button>
+          }
+        </div>
+        @if (agregando()) {
+          <app-buscador-variante (seleccionada)="proponer($event)"></app-buscador-variante>
+          @if (porMover(); as variante) {
+            <ion-card class="confirmacion">
+              <p>
+                ¿Mover <strong>{{ variante.producto }}</strong>, con todas sus tallas, de {{ variante.codigoUbicacion }} a
+                {{ espacio.codigo }}?
+              </p>
+              <div class="botones">
+                <ion-button [disabled]="moviendo()" (click)="mover(variante)">{{ moviendo() ? 'Moviendo…' : 'Mover' }}</ion-button>
+                <ion-button fill="outline" [disabled]="moviendo()" (click)="porMover.set(null)">Cancelar</ion-button>
+              </div>
+            </ion-card>
+          }
+          <div class="rs-acciones">
+            <ion-button expand="block" fill="clear" (click)="terminarDeAgregar()">Listo</ion-button>
+          </div>
+        }
+        @if (aviso(); as texto) {
+          <ion-text color="success">
+            <p role="status" class="aviso">{{ texto }}</p>
+          </ion-text>
+        }
+
         <div class="rs-acciones">
           @if (impresion.disponible) {
-            <ion-button expand="block" (click)="imprimirElegido()">
+            <ion-button expand="block" fill="outline" (click)="imprimirElegido()">
               <ion-icon slot="start" name="print-outline" aria-hidden="true"></ion-icon>
               Imprimir etiqueta
             </ion-button>
           } @else {
             <p class="rs-ayuda">Para imprimir las etiquetas, abre esta pantalla desde el computador.</p>
           }
-          <ion-button expand="block" fill="outline" (click)="codigoElegido.set(null)">Ver todos los espacios</ion-button>
+          <ion-button expand="block" fill="outline" (click)="volverALaLista()">Ver todos los espacios</ion-button>
         </div>
       } @else {
+        <div class="rs-acciones">
+          <ion-button expand="block" [disabled]="escaneando()" (click)="escanearEspacio()">
+            <ion-icon slot="start" name="scan-outline" aria-hidden="true"></ion-icon>
+            Escanear espacio
+          </ion-button>
+        </div>
         <ion-searchbar
           placeholder="Código, producto o categoría"
           [value]="filtro()"
@@ -107,13 +183,13 @@ import { Espacio, agruparEspacios, filtrarEspacios } from './espacios';
           </div>
         }
         @for (espacio of visibles(); track espacio.codigo) {
-          <ion-card button (click)="codigoElegido.set(espacio.codigo)">
+          <ion-card button (click)="abrir(espacio.codigo)">
             <!-- La fila va en un contenedor propio: la tarjeta envuelve su contenido en un botón interno. -->
             <div class="espacio">
               <app-codigo-qr [texto]="espacio.codigo" style="--tamano: 84px"></app-codigo-qr>
               <div>
                 <h2>{{ espacio.codigo }}</h2>
-                <p>{{ espacio.producto }}</p>
+                <p>{{ espacio.productos.join(' · ') }}</p>
                 <p class="tenue">
                   {{ espacio.categoria }}
                   @if (espacio.banda) {
@@ -132,7 +208,7 @@ import { Espacio, agruparEspacios, filtrarEspacios } from './espacios';
       }
       @if (mensaje(); as texto) {
         <ion-text color="danger">
-          <p role="alert">{{ texto }}</p>
+          <p role="alert" class="aviso">{{ texto }}</p>
         </ion-text>
       }
 
@@ -142,7 +218,7 @@ import { Espacio, agruparEspacios, filtrarEspacios } from './espacios';
           <div class="rs-etiqueta">
             <app-codigo-qr [texto]="espacio.codigo"></app-codigo-qr>
             <p class="rs-etiqueta-codigo">{{ espacio.codigo }}</p>
-            <p class="rs-etiqueta-producto">{{ espacio.producto }}</p>
+            <p class="rs-etiqueta-producto">{{ resumen(espacio) }}</p>
           </div>
         }
       </div>
@@ -177,36 +253,142 @@ import { Espacio, agruparEspacios, filtrarEspacios } from './espacios';
       color: var(--rs-tenue);
       font-size: 0.85rem;
     }
+    .titulo-seccion {
+      margin: 20px 16px 4px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--rs-tenue);
+    }
+    .modelo-fila {
+      display: flex;
+      gap: 14px;
+      padding: 12px;
+    }
+    .modelo-datos {
+      min-width: 0;
+      flex: 1;
+    }
+    h4 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--ion-text-color);
+    }
+    .modelo-datos .tenue {
+      margin: 2px 0 8px;
+    }
+    .tallas {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .tallas li {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--ion-color-primary);
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--ion-text-color);
+    }
+    .tallas strong {
+      color: var(--ion-color-primary);
+    }
+    .tallas li.agotada {
+      border-color: var(--rs-tenue);
+      color: var(--rs-tenue);
+    }
+    .tallas li.agotada strong {
+      color: inherit;
+    }
+    .vacio {
+      margin: 8px 16px;
+    }
+    .confirmacion {
+      padding: 12px 16px;
+    }
+    .confirmacion p {
+      margin: 0 0 8px;
+      color: var(--ion-text-color);
+    }
+    .botones {
+      display: flex;
+      gap: 8px;
+    }
+    .aviso {
+      margin: 8px 16px;
+    }
   `,
 })
 export class EspaciosPage {
   private readonly api = inject(InventarioApi);
+  private readonly escaner = inject(EscanerService);
   protected readonly impresion = inject(ImpresionService);
 
-  /** Código de espacio pedido en la dirección (`/espacios?codigo=B-POL-03`), para abrir directo su etiqueta. */
+  /**
+   * Código de espacio pedido en la dirección (`/espacios?codigo=B-POL-03`), por ejemplo al
+   * escanear su etiqueta desde otra pantalla. Cada código nuevo abre su espacio.
+   */
   readonly codigo = input<string>();
-  private codigoPedidoAtendido = false;
 
   private readonly variantes = signal<VarianteStock[]>([]);
   readonly filtro = signal('');
   readonly cargando = signal(false);
   readonly mensaje = signal<string | null>(null);
+  readonly aviso = signal<string | null>(null);
+  readonly escaneando = signal(false);
 
   readonly espacios = computed(() => agruparEspacios(this.variantes()));
   readonly visibles = computed(() => filtrarEspacios(this.espacios(), this.filtro()));
 
   readonly codigoElegido = signal<string | null>(null);
-  readonly elegido = computed<Espacio | null>(
-    () => this.espacios().find((espacio) => espacio.codigo === this.codigoElegido()) ?? null,
-  );
+  /**
+   * El espacio abierto. Uno escaneado que aún no guarda nada también se abre, vacío,
+   * para poder agregarle productos.
+   */
+  readonly elegido = computed<Espacio | null>(() => {
+    const codigo = this.codigoElegido()?.trim().toUpperCase();
+    if (!codigo) {
+      return null;
+    }
+    const existente = this.espacios().find((espacio) => espacio.codigo.toUpperCase() === codigo);
+    if (existente || !esCodigoDeEspacio(codigo)) {
+      return existente ?? null;
+    }
+    const [, zona = '', numero = codigo] = /^B-([^-]+)-(.+)$/.exec(codigo) ?? [];
+    return { codigo, zona, numero, productos: [], categoria: '', banda: null, imagenUrl: null, variantes: 0, unidadesEnBodega: 0 };
+  });
+  readonly contenido = computed(() => {
+    const espacio = this.elegido();
+    return espacio ? contenidoDeEspacio(this.variantes(), espacio.codigo) : [];
+  });
+
+  /** Agregando productos al espacio abierto, y la prenda cuyo producto se propone mover. */
+  readonly agregando = signal(false);
+  readonly porMover = signal<VarianteStock | null>(null);
+  readonly moviendo = signal(false);
 
   private readonly etiqueta = viewChild<ElementRef<HTMLElement>>('etiqueta');
   private readonly hoja = viewChild<ElementRef<HTMLElement>>('hoja');
 
   protected readonly valor = valorDeEvento;
+  protected readonly resumen = resumenDeEspacio;
 
   constructor() {
-    addIcons({ printOutline });
+    addIcons({ addCircleOutline, printOutline, scanOutline });
+    effect(() => {
+      const pedido = this.codigo();
+      if (pedido) {
+        untracked(() => this.abrir(pedido));
+      }
+    });
   }
 
   /** Ionic lo llama cada vez que se entra a la pantalla, de modo que los espacios estén al día. */
@@ -219,15 +401,84 @@ export class EspaciosPage {
     this.mensaje.set(null);
     try {
       this.variantes.set(await firstValueFrom(this.api.buscarVariantes('')));
-      const pedido = this.codigo();
-      if (pedido && !this.codigoPedidoAtendido) {
-        this.codigoPedidoAtendido = true;
-        this.codigoElegido.set(pedido);
-      }
     } catch (error) {
       this.mensaje.set(mensajeDeError(error));
     } finally {
       this.cargando.set(false);
+    }
+  }
+
+  abrir(codigo: string): void {
+    this.codigoElegido.set(codigo.trim().toUpperCase());
+    this.terminarDeAgregar();
+    this.mensaje.set(null);
+  }
+
+  volverALaLista(): void {
+    this.codigoElegido.set(null);
+    this.terminarDeAgregar();
+  }
+
+  /** Lee la etiqueta de un espacio y lo abre con lo que guarda. */
+  async escanearEspacio(): Promise<void> {
+    this.mensaje.set(null);
+    this.escaneando.set(true);
+    try {
+      const resultado = await this.escaner.escanear();
+      if (resultado.estado === 'leido') {
+        if (esCodigoDeEspacio(resultado.codigo)) {
+          this.abrir(resultado.codigo);
+        } else {
+          this.mensaje.set(`${resultado.codigo} no es el código de un espacio: escanea la etiqueta de la repisa.`);
+        }
+      } else if (resultado.estado === 'no-disponible') {
+        this.mensaje.set(resultado.motivo);
+      }
+    } finally {
+      this.escaneando.set(false);
+    }
+  }
+
+  empezarAAgregar(): void {
+    this.agregando.set(true);
+    this.aviso.set(null);
+    this.mensaje.set(null);
+  }
+
+  terminarDeAgregar(): void {
+    this.agregando.set(false);
+    this.porMover.set(null);
+    this.aviso.set(null);
+  }
+
+  /** Antes de mover un producto se pide confirmarlo: se mueve con todas sus tallas. */
+  proponer(variante: VarianteStock): void {
+    this.aviso.set(null);
+    this.mensaje.set(null);
+    if (variante.codigoUbicacion.toUpperCase() === this.elegido()?.codigo.toUpperCase()) {
+      this.porMover.set(null);
+      this.aviso.set(`${variante.producto} ya está en este espacio.`);
+      return;
+    }
+    this.porMover.set(variante);
+  }
+
+  async mover(variante: VarianteStock): Promise<void> {
+    const espacio = this.elegido();
+    if (!espacio || this.moviendo()) {
+      return;
+    }
+    this.moviendo.set(true);
+    this.mensaje.set(null);
+    try {
+      await firstValueFrom(this.api.editarVariante(variante.idVariante, { espacio: espacio.codigo }));
+      this.porMover.set(null);
+      this.variantes.set(await firstValueFrom(this.api.buscarVariantes('')));
+      this.aviso.set(`${variante.producto} quedó en ${espacio.codigo}.`);
+    } catch (error) {
+      this.mensaje.set(mensajeDeError(error));
+    } finally {
+      this.moviendo.set(false);
     }
   }
 

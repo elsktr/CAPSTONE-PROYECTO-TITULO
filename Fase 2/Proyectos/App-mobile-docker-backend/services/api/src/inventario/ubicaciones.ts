@@ -41,6 +41,18 @@ export function codigoDeUbicacion(zona: string, posicion: number): string {
   return `B-${zona}-${String(posicion).padStart(2, '0')}`;
 }
 
+/**
+ * Zona y número de un código de espacio escrito por una persona o leído de una etiqueta
+ * (`b-pol-3` es `POL`, 3), o `null` si no tiene esa forma.
+ */
+export function leerCodigoDeUbicacion(codigo: string): { zona: string; posicion: number } | null {
+  const partes = /^B-([A-Z0-9]+)-(\d{1,4})$/.exec(codigo.trim().toUpperCase());
+  if (!partes || Number(partes[2]) === 0) {
+    return null;
+  }
+  return { zona: partes[1]!, posicion: Number(partes[2]) };
+}
+
 /** SKU y código escaneable de una variante, derivados de su identificador. */
 export function codigosDeVariante(idVariante: number): { sku: string; codigo: string } {
   const correlativo = String(idVariante).padStart(4, '0');

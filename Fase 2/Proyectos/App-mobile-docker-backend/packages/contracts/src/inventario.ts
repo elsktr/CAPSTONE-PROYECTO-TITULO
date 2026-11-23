@@ -28,7 +28,10 @@ export interface VarianteStock {
   banda: string | null;
   /** URL de la foto del producto; `null` si aún no tiene. */
   imagenUrl: string | null;
-  /** Posición del producto en la bodega, por ejemplo "B-POL-03". La genera el servicio. */
+  /**
+   * Espacio de la bodega donde se guarda el producto, por ejemplo "B-POL-03". El servicio
+   * asigna uno nuevo al crearlo; después se puede mover a otro, que puede compartir.
+   */
   codigoUbicacion: string;
   talla: string;
   color: string;
@@ -318,4 +321,9 @@ export interface VarianteEdicionRequest {
   color?: string;
   /** Foto nueva como data URL (`data:image/...;base64,...`). */
   imagen?: string;
+  /**
+   * Espacio de bodega al que pasa el producto, con todas sus tallas y colores, por ejemplo
+   * "B-POL-03". Debe ser de la zona de su categoría; puede ser uno que ya guarda otros productos.
+   */
+  espacio?: string;
 }

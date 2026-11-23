@@ -293,3 +293,53 @@ export interface CierresCaja {
   cierres: CierreCaja[];
   abiertas: { vendedor: string; desde: string; ventas: number; total: number; efectivo: number }[];
 }
+
+// --- Máquinas de cobro Mercado Pago Point (POS) ---
+
+/** Modo en que trabaja una máquina Point. El POS solo le envía cobros en `PDV`. */
+export type ModoTerminal = 'PDV' | 'SELF_SERVICE' | 'STANDALONE' | 'UNDEFINED';
+
+/** GET /pagos/point/terminales (Vendedor, Gerente): las máquinas Point de la cuenta. */
+export interface TerminalPoint {
+  /** Identificador de Mercado Pago: modelo y serie, por ejemplo "NEWLAND_N950__N950NCB123456789". */
+  id: string;
+  modo: ModoTerminal;
+}
+
+export type TipoTarjetaCobro = 'DEBITO' | 'CREDITO';
+
+/**
+ * Estado de un cobro en la máquina. `REVISAR`: la máquina no informó el resultado y hay que
+ * mirarlo en su pantalla antes de cobrar de nuevo.
+ */
+export type EstadoCobroTerminal = 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | 'CANCELADO' | 'ANULADO' | 'REVISAR';
+
+/** POST /pagos/point/cobros (Vendedor, Gerente) */
+export interface CobroPointRequest {
+  terminal: string;
+  monto: number;
+  tipo: TipoTarjetaCobro;
+  /** Clave de la venta en el POS; Mercado Pago la guarda como referencia externa. */
+  referencia: string;
+}
+
+/**
+ * Un cobro en una máquina Point, con la misma forma que el de la máquina simulada del POS.
+ * GET /pagos/point/cobros/:id; POST .../cancelar y .../anular responden lo mismo.
+ */
+export interface CobroTerminal {
+  /** Identificador de la orden en Mercado Pago (`ORD…`). */
+  id: string;
+  monto: number;
+  tipo: TipoTarjetaCobro;
+  referencia: string | null;
+  estado: EstadoCobroTerminal;
+  /** Identificador del pago en Mercado Pago; queda en la venta como código de autorización. */
+  codigoAutorizacion: string | null;
+  /** Últimos dígitos, por ejemplo "•••• 4242". */
+  tarjeta: string | null;
+  /** Explicación del resultado para el vendedor. */
+  motivo: string | null;
+  /** Código de Mercado Pago del resultado, por ejemplo `accredited` o `insufficient_amount`. */
+  codigo: string | null;
+}

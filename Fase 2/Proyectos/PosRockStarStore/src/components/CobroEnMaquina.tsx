@@ -4,6 +4,13 @@ import { alertCircleOutline, cardOutline, closeCircleOutline } from 'ionicons/ic
 import { CobroMaquina, ErrorMaquina, MaquinaDeCobro, TipoTarjeta, esperarResultado } from '../lib/terminal';
 import { formatCLP } from '../utils/format';
 
+/** Titulo del resultado de un cobro que no se aprobo. */
+const TITULOS: Partial<Record<CobroMaquina['estado'], string>> = {
+  RECHAZADO: 'Pago rechazado',
+  CANCELADO: 'Cobro cancelado',
+  REVISAR: 'Revisa la máquina',
+};
+
 type Paso =
   | { tipo: 'enviando' }
   | { tipo: 'esperando' }
@@ -39,27 +46,25 @@ export const CobroEnMaquina: React.FC<Props> = ({ isOpen, maquina, monto, tarjet
 
   const iniciar = async () => {
     detenerEspera();
-    const control = new AbortController();
-    espera.current = control;
     desistido.current = false;
     cobroActual.current = null;
     setPaso({ tipo: 'enviando' });
+    let cobro: CobroMaquina;
     try {
-      const cobro = await maquina.cobrar(monto, tarjeta, referencia);
-      cobroActual.current = cobro;
-      // Se cancelo mientras el monto viajaba: la maquina no debe quedar esperando.
-      if (desistido.current) {
-        await maquina.cancelar(cobro.id).catch(() => undefined);
-        return;
-      }
-      setPaso({ tipo: 'esperando' });
-      const resultado = await esperarResultado(maquina, cobro.id, { senal: control.signal });
-      if (resultado.estado === 'APROBADO') onAprobado(resultado);
-      else setPaso({ tipo: 'rechazado', cobro: resultado });
+      cobro = await maquina.cobrar(monto, tarjeta, referencia);
     } catch (error) {
-      if (control.signal.aborted) return;
-      setPaso({ tipo: 'error', mensaje: error instanceof Error ? error.message : 'La máquina de cobro no respondió.' });
+      if (!desistido.current) {
+        setPaso({ tipo: 'error', mensaje: error instanceof Error ? error.message : 'La máquina de cobro no respondió.' });
+      }
+      return;
     }
+    cobroActual.current = cobro;
+    // Se cancelo mientras el monto viajaba: la maquina no debe quedar esperando.
+    if (desistido.current) {
+      await maquina.cancelar(cobro.id).catch(() => undefined);
+      return;
+    }
+    await iniciarEspera(cobro);
   };
 
   const cancelar = async () => {
@@ -81,6 +86,38 @@ export const CobroEnMaquina: React.FC<Props> = ({ isOpen, maquina, monto, tarjet
             ? 'No se pudo cancelar en la máquina: cancélalo directamente en ella antes de cobrar de nuevo.'
             : error instanceof Error ? error.message : 'No se pudo cancelar el cobro.',
       });
+    }
+  };
+
+  /**
+   * La maquina no informo el resultado: antes de cobrar de nuevo se pregunta otra vez, para
+   * no cobrarle dos veces al cliente si el pago si se aprobo.
+   */
+  const consultarDeNuevo = async (cobro: CobroMaquina) => {
+    try {
+      const actual = await maquina.consultar(cobro.id);
+      if (actual.estado === 'APROBADO') onAprobado(actual);
+      else if (actual.estado === 'PENDIENTE') void iniciarEspera(actual);
+      else setPaso({ tipo: 'rechazado', cobro: actual });
+    } catch (error) {
+      setPaso({ tipo: 'error', mensaje: error instanceof Error ? error.message : 'La máquina de cobro no respondió.' });
+    }
+  };
+
+  /** Vuelve a esperar un cobro que sigue pendiente en la maquina. */
+  const iniciarEspera = async (cobro: CobroMaquina) => {
+    detenerEspera();
+    const control = new AbortController();
+    espera.current = control;
+    cobroActual.current = cobro;
+    setPaso({ tipo: 'esperando' });
+    try {
+      const resultado = await esperarResultado(maquina, cobro.id, { senal: control.signal });
+      if (resultado.estado === 'APROBADO') onAprobado(resultado);
+      else setPaso({ tipo: 'rechazado', cobro: resultado });
+    } catch (error) {
+      if (control.signal.aborted) return;
+      setPaso({ tipo: 'error', mensaje: error instanceof Error ? error.message : 'La máquina de cobro no respondió.' });
     }
   };
 
@@ -123,8 +160,9 @@ export const CobroEnMaquina: React.FC<Props> = ({ isOpen, maquina, monto, tarjet
           {paso.tipo === 'rechazado' && (
             <div className="maquina-estado maquina-falla" role="alert">
               <IonIcon icon={closeCircleOutline} />
-              <strong>{paso.cobro.estado === 'RECHAZADO' ? 'Pago rechazado' : 'Cobro cancelado'}</strong>
+              <strong>{TITULOS[paso.cobro.estado] ?? 'Cobro no realizado'}</strong>
               {paso.cobro.motivo && <span>{paso.cobro.motivo}</span>}
+              {paso.cobro.codigo && <span className="maquina-codigo">Código Mercado Pago: {paso.cobro.codigo}</span>}
             </div>
           )}
 
@@ -143,7 +181,16 @@ export const CobroEnMaquina: React.FC<Props> = ({ isOpen, maquina, monto, tarjet
           </IonButton>
         ) : (
           <>
-            <IonButton expand="block" onClick={() => void iniciar()}>
+            {paso.tipo === 'rechazado' && paso.cobro.estado === 'REVISAR' && (
+              <IonButton expand="block" onClick={() => void consultarDeNuevo(paso.cobro)}>
+                Consultar el resultado
+              </IonButton>
+            )}
+            <IonButton
+              expand="block"
+              fill={paso.tipo === 'rechazado' && paso.cobro.estado === 'REVISAR' ? 'outline' : 'solid'}
+              onClick={() => void iniciar()}
+            >
               <IonIcon icon={cardOutline} slot="start" />
               Reintentar en la máquina
             </IonButton>

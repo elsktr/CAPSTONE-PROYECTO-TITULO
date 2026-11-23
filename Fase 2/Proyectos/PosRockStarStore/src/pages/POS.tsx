@@ -38,7 +38,7 @@ import { CobroEnMaquina } from '../components/CobroEnMaquina';
 import { SelectorPago } from '../components/SelectorPago';
 import { CierreCajaModal } from '../components/CierreCajaModal';
 import { AjustesMaquina } from '../components/AjustesMaquina';
-import { CobroMaquina, ConfigMaquina, guardarConfigMaquina, leerConfigMaquina, maquinaHttp, pagoParaVenta, tipoTarjeta } from '../lib/terminal';
+import { CobroMaquina, ConfigMaquina, guardarConfigMaquina, leerConfigMaquina, maquinaDeConfig, pagoParaVenta, tipoTarjeta } from '../lib/terminal';
 
 const POS: React.FC = () => {
   const { vendedor, logout, cliente, setCliente } = useAuth();
@@ -89,7 +89,9 @@ const POS: React.FC = () => {
 
   // Maquina de cobro de esta caja.
   const [configMaquina, setConfigMaquina] = useState<ConfigMaquina>(leerConfigMaquina);
-  const maquina = useMemo(() => maquinaHttp(configMaquina.direccion), [configMaquina.direccion]);
+  // La de prueba en la red, o una Mercado Pago Point a traves de la API con la sesion del vendedor.
+  const tokenVendedor = vendedor?.accessToken ?? '';
+  const maquina = useMemo(() => maquinaDeConfig(configMaquina, tokenVendedor), [configMaquina, tokenVendedor]);
   const [showAjustesMaquina, setShowAjustesMaquina] = useState(false);
   const [showCobroMaquina, setShowCobroMaquina] = useState(false);
   // Cobro aprobado en la maquina cuya venta aun no queda registrada. Si la venta no se
@@ -858,6 +860,7 @@ const POS: React.FC = () => {
         <AjustesMaquina
           isOpen={showAjustesMaquina}
           config={configMaquina}
+          accessToken={tokenVendedor}
           onGuardar={guardarAjustesMaquina}
           onClose={() => setShowAjustesMaquina(false)}
         />

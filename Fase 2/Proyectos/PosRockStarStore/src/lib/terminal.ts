@@ -1,15 +1,28 @@
 /**
- * Maquina de cobro (terminal de tarjetas) en la red de la tienda.
+ * Maquina de cobro (terminal de tarjetas) de la caja, en uno de dos modos:
  *
- * El navegador de la caja le habla directo por HTTP a su IP. Hoy responde la maquina
- * simulada (`terminal-simulada/`); una maquina real se conecta con otro cliente que
- * cumpla `MaquinaDeCobro`, sin tocar el flujo de venta.
+ * - Prueba: la maquina simulada (`terminal-simulada/`), a la que el navegador de la caja
+ *   le habla directo por HTTP a su IP. Responde con los codigos de Mercado Pago Point.
+ * - Mercado Pago Point: una maquina real. La caja le pide a la API que cobre en ella; la
+ *   API tiene el access token de la cuenta de Mercado Pago.
+ *
+ * Las dos cumplen `MaquinaDeCobro`: el flujo de venta no distingue cual se usa.
  */
 
-import type { MedioPresencial, PagoMaquina } from './api';
+import {
+  ErrorApi,
+  anularCobroPoint,
+  cancelarCobroPoint,
+  cobrarEnPoint,
+  consultarCobroPoint,
+  getTerminalesPoint,
+  type MedioPresencial,
+  type PagoMaquina,
+} from './api';
 
 export type TipoTarjeta = 'DEBITO' | 'CREDITO';
-export type EstadoCobro = 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | 'CANCELADO' | 'ANULADO';
+/** `REVISAR`: la maquina no informo el resultado; hay que mirarlo en su pantalla. */
+export type EstadoCobro = 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | 'CANCELADO' | 'ANULADO' | 'REVISAR';
 
 export interface CobroMaquina {
   id: string;
@@ -21,6 +34,8 @@ export interface CobroMaquina {
   /** Ultimos digitos, por ejemplo "•••• 4242". */
   tarjeta: string | null;
   motivo: string | null;
+  /** Codigo de Mercado Pago del resultado, por ejemplo `accredited` o `insufficient_amount`. */
+  codigo?: string | null;
 }
 
 export interface InfoMaquina {
@@ -37,6 +52,8 @@ export interface MaquinaDeCobro {
   cancelar(id: string): Promise<CobroMaquina>;
   /** Reversa un cobro aprobado. */
   anular(id: string): Promise<CobroMaquina>;
+  /** Cada cuanto consultar el cobro mientras se espera el pago; por omision, cada segundo. */
+  readonly intervaloMs?: number;
 }
 
 export class ErrorMaquina extends Error {
@@ -49,22 +66,31 @@ export class ErrorMaquina extends Error {
   }
 }
 
+/** `prueba`: la maquina simulada en la red. `mercadopago`: una maquina Point real. */
+export type ModoMaquina = 'prueba' | 'mercadopago';
+
 /** Configuracion de esta caja: cada caja tiene su maquina al lado. */
 export interface ConfigMaquina {
   activa: boolean;
-  /** IP y puerto en la red, por ejemplo "192.168.1.50:8090". */
+  modo: ModoMaquina;
+  /** Maquina de prueba: IP y puerto en la red, por ejemplo "192.168.1.50:8090". */
   direccion: string;
+  /** Maquina Mercado Pago Point: su identificador, por ejemplo "NEWLAND_N950__N950NCB123456789". */
+  terminal: string;
 }
 
 const CONFIG_KEY = 'pos_maquina_cobro';
-export const CONFIG_MAQUINA_INICIAL: ConfigMaquina = { activa: false, direccion: 'localhost:8090' };
+export const CONFIG_MAQUINA_INICIAL: ConfigMaquina = { activa: false, modo: 'prueba', direccion: 'localhost:8090', terminal: '' };
 
 export function leerConfigMaquina(): ConfigMaquina {
   try {
     const guardada = JSON.parse(localStorage.getItem(CONFIG_KEY) ?? 'null') as Partial<ConfigMaquina> | null;
     return {
       activa: guardada?.activa === true,
+      // Una configuracion de antes de los modos era siempre la maquina simulada.
+      modo: guardada?.modo === 'mercadopago' ? 'mercadopago' : 'prueba',
       direccion: typeof guardada?.direccion === 'string' && guardada.direccion.trim() ? guardada.direccion : CONFIG_MAQUINA_INICIAL.direccion,
+      terminal: typeof guardada?.terminal === 'string' ? guardada.terminal : '',
     };
   } catch {
     return CONFIG_MAQUINA_INICIAL;
@@ -158,6 +184,59 @@ export function maquinaHttp(direccion: string, fetchImpl: typeof fetch = (...a) 
   };
 }
 
+/** La maquina Point se consulta cada 2 segundos: cada consulta pasa por la API hasta Mercado Pago. */
+const INTERVALO_POINT_MS = 2000;
+
+/** "NEWLAND_N950__N950NCB123456789" -> modelo "NEWLAND N950" y serie "N950NCB123456789". */
+export function partesTerminal(id: string): { modelo: string; serie: string } {
+  const [modelo, serie] = id.includes('__') ? id.split('__') : ['Point', id];
+  return { modelo: modelo.replace(/_/g, ' '), serie };
+}
+
+/**
+ * Maquina Mercado Pago Point real, a traves de la API (`/pagos/point`). Los errores de la
+ * API llegan como `ErrorMaquina`, con el mismo codigo, para que el flujo de venta los trate
+ * igual que los de la maquina de prueba.
+ */
+export function maquinaMercadoPago(accessToken: string, terminal: string): MaquinaDeCobro {
+  const conErrores = async <T>(llamada: () => Promise<T>): Promise<T> => {
+    try {
+      return await llamada();
+    } catch (error) {
+      if (error instanceof ErrorMaquina) throw error;
+      if (error instanceof ErrorApi) {
+        const cobro = error.codigo === 'ESTADO_INVALIDO' ? (error.detalle as CobroMaquina | undefined) : undefined;
+        throw new ErrorMaquina(error.message, error.codigo ?? String(error.status), cobro);
+      }
+      throw new ErrorMaquina('No se pudo conectar con el servidor para usar la máquina Mercado Pago.', 'SIN_CONEXION');
+    }
+  };
+
+  return {
+    intervaloMs: INTERVALO_POINT_MS,
+    info: () =>
+      conErrores(async () => {
+        if (!terminal) throw new ErrorMaquina('Elige la máquina Mercado Pago de esta caja.', 'SIN_TERMINAL');
+        const encontrada = (await getTerminalesPoint(accessToken)).find((t) => t.id === terminal);
+        if (!encontrada) throw new ErrorMaquina(`La máquina ${terminal} no está en la cuenta de Mercado Pago.`, 'NO_ENCONTRADO');
+        if (encontrada.modo !== 'PDV') {
+          throw new ErrorMaquina('La máquina no está en modo PDV: usa "Activar en modo PDV" y reiníciala.', 'NO_PDV');
+        }
+        return { nombre: 'Mercado Pago Point', ...partesTerminal(terminal) };
+      }),
+    cobrar: (monto, tipo, referencia) => conErrores(() => cobrarEnPoint(accessToken, { terminal, monto, tipo, referencia })),
+    consultar: (id) => conErrores(() => consultarCobroPoint(accessToken, id)),
+    // La API ya responde el cobro aprobado si el cliente alcanzo a pagar antes de cancelar.
+    cancelar: (id) => conErrores(() => cancelarCobroPoint(accessToken, id)),
+    anular: (id) => conErrores(() => anularCobroPoint(accessToken, id)),
+  };
+}
+
+/** La maquina de esta caja segun su configuracion. */
+export function maquinaDeConfig(config: ConfigMaquina, accessToken: string): MaquinaDeCobro {
+  return config.modo === 'mercadopago' ? maquinaMercadoPago(accessToken, config.terminal) : maquinaHttp(config.direccion);
+}
+
 /** Fallas de red seguidas que se toleran mientras se espera el pago. */
 const FALLAS_TOLERADAS = 5;
 
@@ -168,7 +247,7 @@ const FALLAS_TOLERADAS = 5;
 export async function esperarResultado(
   maquina: MaquinaDeCobro,
   id: string,
-  { intervaloMs = 1000, senal }: { intervaloMs?: number; senal?: AbortSignal } = {},
+  { intervaloMs = maquina.intervaloMs ?? 1000, senal }: { intervaloMs?: number; senal?: AbortSignal } = {},
 ): Promise<CobroMaquina> {
   let fallas = 0;
   for (;;) {

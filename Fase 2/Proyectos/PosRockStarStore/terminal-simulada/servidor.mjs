@@ -1,26 +1,56 @@
 // Maquina de cobro simulada: hace de terminal de tarjetas en la red de la tienda mientras
 // no haya una real. El POS le envia el monto y consulta el resultado; la "pantalla" de la
-// maquina (GET /) se abre en un celular o en otra pestana para aprobar o rechazar el pago.
+// maquina (GET /) se abre en un celular o en otra pestana para elegir como termina el pago.
+// Responde con los codigos de las maquinas Mercado Pago Point (`codigo`, el `status_detail`
+// de su API de Ordenes): aprobado, cada motivo de rechazo, cancelado en la maquina, expirado
+// y sin respuesta.
 //
 // Protocolo (JSON, CORS abierto para que el navegador del POS llegue directo):
 //   GET  /api/estado                 nombre, modelo y serie de la maquina
+//   GET  /api/codigos                los codigos de rechazo que se pueden simular, con su motivo
 //   POST /api/cobros                 { monto, tipo: DEBITO|CREDITO, referencia } -> cobro PENDIENTE
 //   GET  /api/cobros/:id             estado del cobro
 //   POST /api/cobros/:id/cancelar    la caja desiste antes de que se pague
 //   POST /api/cobros/:id/anular      reversa un cobro ya aprobado
 // Solo de la pantalla simulada:
-//   GET  /api/cobros/actual          el cobro esperando tarjeta, o null
-//   POST /api/cobros/:id/aprobar     simula pasar la tarjeta
-//   POST /api/cobros/:id/rechazar    { motivo }
+//   GET  /api/cobros/actual                    el cobro esperando tarjeta, o null
+//   POST /api/cobros/:id/aprobar               simula pasar la tarjeta (accredited)
+//   POST /api/cobros/:id/rechazar              { codigo } de RECHAZOS, o { motivo } libre
+//   POST /api/cobros/:id/cancelar-en-maquina   el cliente cancela en la maquina (canceled_on_terminal)
+//   POST /api/cobros/:id/sin-respuesta         la maquina no informa el resultado (check_on_terminal)
 //
 // Variables: PUERTO (8090), APROBAR_AUTOMATICO_MS (0 = se aprueba desde la pantalla),
-// EXPIRA_MS (120000: un cobro sin pagar se cancela solo).
+// EXPIRA_MS (120000: un cobro sin pagar expira solo).
 
 import { createServer } from 'node:http';
 import { randomInt, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const MAQUINA = { nombre: 'Máquina de cobro simulada', modelo: 'SIM-POS 1', serie: 'SIM-0001' };
+
+/** Rechazos de una maquina Mercado Pago Point (`status_detail` de un pago `failed`) y su motivo. */
+export const RECHAZOS = {
+  insufficient_amount: 'Fondos insuficientes.',
+  card_disabled: 'La tarjeta está bloqueada o inhabilitada.',
+  rejected_by_issuer: 'El banco emisor rechazó la tarjeta.',
+  bad_filled_card_data: 'Datos de la tarjeta mal ingresados (número, código de seguridad o vencimiento).',
+  high_risk: 'Rechazado por prevención de fraude.',
+  required_call_for_authorize: 'El banco pide que el cliente llame para autorizar el pago.',
+  max_attempts_exceeded: 'Se superó el número de intentos permitidos con esta tarjeta.',
+  amount_limit_exceeded: 'El monto supera el límite de la tarjeta.',
+  invalid_installments: 'La tarjeta no acepta ese número de cuotas.',
+  processing_error: 'Error al procesar el pago en la máquina.',
+  in_review: 'El pago quedó en revisión.',
+  rejected_other_reason: 'El banco emisor rechazó el pago.',
+};
+
+const MOTIVOS = {
+  canceled_by_api: 'Se canceló desde la caja.',
+  canceled_on_terminal: 'Se canceló en la máquina.',
+  expired: 'Se acabó el tiempo para pagar en la máquina.',
+  check_on_terminal: 'La máquina no informó el resultado: revísalo en su pantalla antes de cobrar de nuevo.',
+  refunded: 'Pago devuelto al cliente.',
+};
 
 export function crearServidor({ aprobarAutomaticoMs = 0, expiraMs = 120_000 } = {}) {
   /** @type {Map<string, any>} */
@@ -35,7 +65,7 @@ export function crearServidor({ aprobarAutomaticoMs = 0, expiraMs = 120_000 } = 
 
   const vigente = (cobro) => {
     if (cobro.estado === 'PENDIENTE' && Date.now() - Date.parse(cobro.creadoEn) > expiraMs) {
-      resolver(cobro, { estado: 'CANCELADO', motivo: 'Tiempo agotado en la máquina' });
+      resolver(cobro, { estado: 'CANCELADO', codigo: 'expired', motivo: MOTIVOS.expired });
     }
     return cobro;
   };
@@ -43,12 +73,15 @@ export function crearServidor({ aprobarAutomaticoMs = 0, expiraMs = 120_000 } = 
   const aprobar = (cobro) =>
     resolver(cobro, {
       estado: 'APROBADO',
+      codigo: 'accredited',
       codigoAutorizacion: String(randomInt(0, 1_000_000)).padStart(6, '0'),
       tarjeta: `•••• ${String(randomInt(0, 10_000)).padStart(4, '0')}`,
     });
 
   const rutas = [
     ['GET', /^\/api\/estado$/, () => [200, { ...MAQUINA, cobroEnCurso: actual }]],
+
+    ['GET', /^\/api\/codigos$/, () => [200, Object.entries(RECHAZOS).map(([codigo, motivo]) => ({ codigo, motivo }))]],
 
     ['GET', /^\/api\/cobros\/actual$/, () => [200, actual ? vigente(cobros.get(actual)) : null]],
 
@@ -68,6 +101,7 @@ export function crearServidor({ aprobarAutomaticoMs = 0, expiraMs = 120_000 } = 
         codigoAutorizacion: null,
         tarjeta: null,
         motivo: null,
+        codigo: null,
         creadoEn: new Date().toISOString(),
         resueltoEn: null,
       };
@@ -84,11 +118,11 @@ export function crearServidor({ aprobarAutomaticoMs = 0, expiraMs = 120_000 } = 
       return cobro ? [200, vigente(cobro)] : [404, { codigo: 'NO_ENCONTRADO', mensaje: 'El cobro no existe.' }];
     }],
 
-    ['POST', /^\/api\/cobros\/([\w-]+)\/(cancelar|anular|aprobar|rechazar)$/, ([, id, accion], cuerpo) => {
+    ['POST', /^\/api\/cobros\/([\w-]+)\/(cancelar-en-maquina|sin-respuesta|cancelar|anular|aprobar|rechazar)$/, ([, id, accion], cuerpo) => {
       const cobro = cobros.get(id);
       if (!cobro) return [404, { codigo: 'NO_ENCONTRADO', mensaje: 'El cobro no existe.' }];
       vigente(cobro);
-      const desde = { cancelar: 'PENDIENTE', aprobar: 'PENDIENTE', rechazar: 'PENDIENTE', anular: 'APROBADO' }[accion];
+      const desde = accion === 'anular' ? 'APROBADO' : 'PENDIENTE';
       // Repetir una anulacion o cancelacion ya hecha responde lo mismo: la caja puede reintentar.
       if ((accion === 'anular' && cobro.estado === 'ANULADO') || (accion === 'cancelar' && cobro.estado === 'CANCELADO')) {
         return [200, cobro];
@@ -98,11 +132,17 @@ export function crearServidor({ aprobarAutomaticoMs = 0, expiraMs = 120_000 } = 
       }
       if (accion === 'aprobar') return [200, aprobar(cobro)];
       if (accion === 'rechazar') {
-        const motivo = typeof cuerpo?.motivo === 'string' && cuerpo.motivo.trim() ? cuerpo.motivo.trim() : 'Rechazada por el emisor';
-        return [200, resolver(cobro, { estado: 'RECHAZADO', motivo })];
+        const codigo = Object.hasOwn(RECHAZOS, cuerpo?.codigo) ? cuerpo.codigo : 'rejected_other_reason';
+        const motivo = typeof cuerpo?.motivo === 'string' && cuerpo.motivo.trim() ? cuerpo.motivo.trim() : RECHAZOS[codigo];
+        return [200, resolver(cobro, { estado: 'RECHAZADO', codigo, motivo })];
       }
-      if (accion === 'cancelar') return [200, resolver(cobro, { estado: 'CANCELADO', motivo: 'Cancelado desde la caja' })];
-      return [200, resolver(cobro, { estado: 'ANULADO', motivo: 'Anulado desde la caja' })];
+      const final = {
+        cancelar: ['CANCELADO', 'canceled_by_api'],
+        'cancelar-en-maquina': ['CANCELADO', 'canceled_on_terminal'],
+        'sin-respuesta': ['REVISAR', 'check_on_terminal'],
+        anular: ['ANULADO', 'refunded'],
+      }[accion];
+      return [200, resolver(cobro, { estado: final[0], codigo: final[1], motivo: MOTIVOS[final[1]] })];
     }],
   ];
 
@@ -165,6 +205,9 @@ const PANTALLA = `<!doctype html>
   .aprobar { background: var(--ok); border-color: var(--ok); }
   .rechazar { background: transparent; color: var(--mal); border-color: var(--mal); }
   select { background: #000; color: var(--texto); margin-top: 10px; }
+  .otras { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .otra { background: transparent; color: var(--suave); }
+  .codigo { font-family: ui-monospace, monospace; font-size: 13px; color: var(--suave); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -178,17 +221,20 @@ const PANTALLA = `<!doctype html>
       <div class="monto" id="monto"></div>
       <div class="nota">Acerque, inserte o deslice la tarjeta</div>
     </div>
-    <div id="fin" hidden><div class="resultado" id="resultado"></div><div class="nota" id="detalle"></div></div>
+    <div id="fin" hidden><div class="resultado" id="resultado"></div><div class="nota" id="detalle"></div><div class="codigo" id="codigo-fin"></div></div>
   </div>
   <div id="acciones" hidden>
-    <button class="aprobar" id="btn-aprobar">Pasar tarjeta (aprobar)</button>
-    <select id="motivo" aria-label="Motivo del rechazo">
-      <option>Fondos insuficientes</option>
-      <option>Tarjeta bloqueada</option>
-      <option>Clave incorrecta</option>
-      <option>Rechazada por el emisor</option>
+    <button class="aprobar" id="btn-aprobar">Pasar tarjeta (aprobar · accredited)</button>
+    <select id="codigo" aria-label="Código de rechazo de Mercado Pago">
+      ${Object.entries(RECHAZOS)
+        .map(([codigo, motivo]) => `<option value="${codigo}">${codigo} · ${motivo}</option>`)
+        .join('\n      ')}
     </select>
-    <button class="rechazar" id="btn-rechazar">Rechazar</button>
+    <button class="rechazar" id="btn-rechazar">Rechazar con este código</button>
+    <div class="otras">
+      <button class="otra" id="btn-cancelar">Cancelar en la máquina</button>
+      <button class="otra" id="btn-sin-respuesta">Sin respuesta</button>
+    </div>
   </div>
 </main>
 <script>
@@ -205,6 +251,7 @@ const PANTALLA = `<!doctype html>
     $('resultado').textContent = ok ? 'APROBADO' : cobro.estado;
     $('resultado').className = 'resultado ' + (ok ? 'ok' : 'mal');
     $('detalle').textContent = ok ? clp(cobro.monto) + ' · Autorización ' + cobro.codigoAutorizacion + ' · ' + cobro.tarjeta : (cobro.motivo || '');
+    $('codigo-fin').textContent = cobro.codigo || '';
   }
   async function refrescar() {
     try {
@@ -225,7 +272,9 @@ const PANTALLA = `<!doctype html>
     if (!actual && ultimo) mostrarFin(ultimo);
   }
   $('btn-aprobar').onclick = () => actual && post('/api/cobros/' + actual.id + '/aprobar');
-  $('btn-rechazar').onclick = () => actual && post('/api/cobros/' + actual.id + '/rechazar', { motivo: $('motivo').value });
+  $('btn-rechazar').onclick = () => actual && post('/api/cobros/' + actual.id + '/rechazar', { codigo: $('codigo').value });
+  $('btn-cancelar').onclick = () => actual && post('/api/cobros/' + actual.id + '/cancelar-en-maquina');
+  $('btn-sin-respuesta').onclick = () => actual && post('/api/cobros/' + actual.id + '/sin-respuesta');
   setInterval(refrescar, 1000);
   refrescar();
 </script>

@@ -332,3 +332,60 @@ export async function cerrarCaja(accessToken: string, datos: CierreCajaRequest):
   });
   return (await leerJson(res)) as CierreCaja;
 }
+
+// --- Maquinas Mercado Pago Point ---
+// La caja no habla con Mercado Pago: la API tiene el access token y cobra en la maquina.
+
+export type ModoTerminal = 'PDV' | 'SELF_SERVICE' | 'STANDALONE' | 'UNDEFINED';
+
+/** GET /pagos/point/terminales: maquinas Point de la cuenta de Mercado Pago. */
+export interface TerminalPoint {
+  /** Modelo y serie, por ejemplo "NEWLAND_N950__N950NCB123456789". */
+  id: string;
+  /** Solo en `PDV` la maquina recibe los cobros de la caja. */
+  modo: ModoTerminal;
+}
+
+/** Cobro en una maquina Point, con la misma forma que `CobroMaquina` (ver terminal.ts). */
+export interface CobroPoint {
+  id: string;
+  monto: number;
+  tipo: 'DEBITO' | 'CREDITO';
+  referencia: string | null;
+  estado: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | 'CANCELADO' | 'ANULADO' | 'REVISAR';
+  codigoAutorizacion: string | null;
+  tarjeta: string | null;
+  motivo: string | null;
+  codigo: string | null;
+}
+
+async function pedirPoint<T>(accessToken: string, metodo: 'GET' | 'POST', ruta: string, cuerpo?: unknown): Promise<T> {
+  const res = await fetch(`${baseApi()}/pagos/point${ruta}`, {
+    method: metodo,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(cuerpo === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
+    cache: 'no-store',
+  });
+  return (await leerJson(res)) as T;
+}
+
+export const getTerminalesPoint = (accessToken: string) => pedirPoint<TerminalPoint[]>(accessToken, 'GET', '/terminales');
+
+/** Pone la maquina en modo PDV, para que reciba los cobros de la caja. */
+export const activarTerminalPoint = (accessToken: string, id: string) =>
+  pedirPoint<TerminalPoint>(accessToken, 'POST', `/terminales/${encodeURIComponent(id)}/activar`);
+
+export const cobrarEnPoint = (accessToken: string, datos: { terminal: string; monto: number; tipo: 'DEBITO' | 'CREDITO'; referencia: string }) =>
+  pedirPoint<CobroPoint>(accessToken, 'POST', '/cobros', datos);
+
+export const consultarCobroPoint = (accessToken: string, id: string) =>
+  pedirPoint<CobroPoint>(accessToken, 'GET', `/cobros/${encodeURIComponent(id)}`);
+
+export const cancelarCobroPoint = (accessToken: string, id: string) =>
+  pedirPoint<CobroPoint>(accessToken, 'POST', `/cobros/${encodeURIComponent(id)}/cancelar`);
+
+export const anularCobroPoint = (accessToken: string, id: string) =>
+  pedirPoint<CobroPoint>(accessToken, 'POST', `/cobros/${encodeURIComponent(id)}/anular`);

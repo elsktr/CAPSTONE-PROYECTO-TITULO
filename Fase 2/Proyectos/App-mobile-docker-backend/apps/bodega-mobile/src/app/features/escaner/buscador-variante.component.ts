@@ -1,4 +1,5 @@
 import { Component, inject, input, output, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { IonButton, IonIcon, IonItem, IonLabel, IonList, IonNote, IonSearchbar, IonText } from '@ionic/angular';
 import type { VarianteStock } from '@rockstar/contracts';
 import { addIcons } from 'ionicons';
@@ -18,7 +19,7 @@ import { EscanerService } from './escaner.service';
  */
 @Component({
   selector: 'app-buscador-variante',
-  imports: [ImagenPrendaComponent, IonButton, IonIcon, IonItem, IonLabel, IonList, IonNote, IonSearchbar, IonText],
+  imports: [ImagenPrendaComponent, IonButton, IonIcon, IonItem, IonLabel, IonList, IonNote, IonSearchbar, IonText, RouterLink],
   template: `
     @if (conEscaner()) {
       <div class="rs-acciones">
@@ -32,6 +33,13 @@ import { EscanerService } from './escaner.service';
       <ion-text color="warning">
         <p role="status">{{ mensaje }}</p>
       </ion-text>
+    }
+    @if (espacioLeido(); as codigo) {
+      <div class="rs-acciones">
+        <ion-button expand="block" fill="outline" routerLink="/espacios" [queryParams]="{ codigo }">
+          Ver todo lo que guarda {{ codigo }}
+        </ion-button>
+      </div>
     }
     <ion-searchbar
       placeholder="SKU, nombre o espacio"
@@ -77,6 +85,8 @@ export class BuscadorVarianteComponent {
   protected readonly resultados = signal<VarianteStock[]>([]);
   protected readonly sinResultados = signal(false);
   readonly aviso = signal<string | null>(null);
+  /** Código del último espacio escaneado, para ofrecer verlo entero en su pantalla. */
+  readonly espacioLeido = signal<string | null>(null);
   protected readonly ocupado = signal(false);
 
   protected readonly nombre = nombreVariante;
@@ -88,6 +98,7 @@ export class BuscadorVarianteComponent {
 
   async escanear(): Promise<void> {
     this.aviso.set(null);
+    this.espacioLeido.set(null);
     this.ocupado.set(true);
     try {
       const resultado = await this.escaner.escanear();
@@ -104,6 +115,7 @@ export class BuscadorVarianteComponent {
   async buscar(texto: string): Promise<void> {
     this.texto.set(texto);
     this.aviso.set(null);
+    this.espacioLeido.set(null);
     if (texto.trim() === '') {
       this.resultados.set([]);
       this.sinResultados.set(false);
@@ -160,6 +172,7 @@ export class BuscadorVarianteComponent {
       this.resultados.set(delEspacio);
       this.sinResultados.set(false);
       this.aviso.set(`Espacio ${codigo}: elige la talla y el color.`);
+      this.espacioLeido.set(codigo.toUpperCase());
     }
   }
 }

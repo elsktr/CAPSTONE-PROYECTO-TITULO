@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { codigoDeUbicacion, codigosDeVariante, elegirZona, esUbicacion } from './ubicaciones.js';
+import { codigoDeUbicacion, codigosDeVariante, elegirZona, esUbicacion, leerCodigoDeUbicacion } from './ubicaciones.js';
 
 describe('elegirZona', () => {
   it('usa las tres primeras letras de la categoría', () => {
@@ -27,6 +27,15 @@ describe('códigos', () => {
   it('arma el código de ubicación con la posición a dos dígitos', () => {
     expect(codigoDeUbicacion('POL', 3)).toBe('B-POL-03');
     expect(codigoDeUbicacion('POL', 120)).toBe('B-POL-120');
+  });
+
+  it('lee la zona y el número de un código de espacio, como lo escriba una persona', () => {
+    expect(leerCodigoDeUbicacion('B-POL-03')).toEqual({ zona: 'POL', posicion: 3 });
+    expect(leerCodigoDeUbicacion(' b-pol-3 ')).toEqual({ zona: 'POL', posicion: 3 });
+    expect(leerCodigoDeUbicacion('B-TE1-120')).toEqual({ zona: 'TE1', posicion: 120 });
+    expect(leerCodigoDeUbicacion('B-POL-00')).toBeNull();
+    expect(leerCodigoDeUbicacion('RS-0003')).toBeNull();
+    expect(leerCodigoDeUbicacion('B-POL-03-A')).toBeNull();
   });
 
   it('deriva el SKU y el código escaneable del identificador', () => {

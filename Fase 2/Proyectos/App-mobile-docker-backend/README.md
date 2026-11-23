@@ -54,6 +54,13 @@ npm run semilla:prendas
 
 El catálogo está en `db/semillas/prendas/catalogo.json`. Como el de bandas, se puede ejecutar más de una vez sin duplicar nada, y sus imágenes también son ilustraciones.
 
+**Bodega ordenada por espacios.** Después de cargar los catálogos, este comando junta en un mismo espacio los productos que van juntos. Las poleras y polerones quedan en un espacio por banda: todas las de Iron Maiden en un `B-POL`. Las chaquetas, pantalones y cinturones van de a tres por espacio. A cada prenda de banda le completa las tallas de la S a la XL, con un ingreso a la bodega. Al escanear la etiqueta de un espacio se ven sus modelos con las tallas, y la tienda web vende las mismas tallas. Se puede repetir sin cambiar nada.
+
+```
+cd services/api
+npm run semilla:espacios
+```
+
 **Recomendaciones de inversión.** En la tienda, el Gerente entra por "Acceso administrador" y, en Finanzas, abre "Recomendaciones de inversión". Es un modelo predictivo que usa las ventas del e-commerce y de la tienda física (`GET /api/v1/analitica/recomendaciones`, solo Gerente):
 
 - Pronostica la demanda semanal de cada prenda (talla y color). Para cada tipo de demanda, regular o intermitente según el criterio de Syntetos-Boylan, elige entre suavizado exponencial, Syntetos-Boylan, Holt amortiguado y media móvil: se queda con el que menos erró en semanas pasadas. El error que muestra se mide en las últimas 4 semanas, que no se usan para elegir, y se compara con repetir el promedio reciente.
@@ -155,7 +162,9 @@ Para que use la API real, pulsa "Modo demostración" bajo el botón de inicio de
 
 La pantalla "Ubicaciones" muestra los racks de la bodega y el código QR de cada uno, con su número, por ejemplo `B-POL-03`. Para imprimirlas, abre la app en el navegador del computador (http://localhost:8080), entra a esa pantalla y usa "Imprimir etiquetas". Salen tres por fila, con línea de corte.
 
-Al escanear una etiqueta desde la app, en cualquier pantalla con el botón "Escanear código", aparecen las prendas guardadas en ese espacio.
+Un espacio puede guardar varios productos, por ejemplo distintos modelos de poleras de una misma banda. En "Ubicaciones", **Escanear espacio** lee la etiqueta y muestra lo que guarda, agrupado por modelo: foto, banda, color y cada talla con sus unidades en bodega (las agotadas aparecen atenuadas). **Agregar producto a este espacio** mueve ahí otro producto, con todas sus tallas, al escanear o buscar una de sus prendas. El espacio debe ser de la zona de su categoría: una polera va en un `B-POL`. Al escanear un número de espacio que aún no se usa, se abre vacío, listo para guardar productos.
+
+Al escanear la etiqueta de un espacio desde otra pantalla con el botón "Escanear código", la app ofrece sus prendas para elegir una y un botón para ver el espacio entero.
 
 ## Etiquetas QR de las prendas
 

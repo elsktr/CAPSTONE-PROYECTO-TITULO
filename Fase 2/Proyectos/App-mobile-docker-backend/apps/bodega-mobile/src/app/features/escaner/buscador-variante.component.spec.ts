@@ -80,6 +80,8 @@ describe('BuscadorVarianteComponent', () => {
       expect(seleccionadas).toEqual([]);
       expect(buscador['resultados']().map((v) => v.sku)).toEqual(['RS-0001', 'RS-0002']);
       expect(buscador.aviso()).toBe('Espacio B-POL-01: elige la talla y el color.');
+      // También ofrece abrir el espacio entero, con todos sus modelos.
+      expect(buscador.espacioLeido()).toBe('B-POL-01');
     });
 
     it('elige la prenda directamente cuando el espacio guarda una sola', async () => {

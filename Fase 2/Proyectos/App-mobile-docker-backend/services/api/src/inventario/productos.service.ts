@@ -14,7 +14,7 @@ import { BaseDeDatos, type Ejecutor } from '../db/base-de-datos.js';
 import { CatalogosService } from './catalogos.service.js';
 import { MES_ACTUAL, variantesConStock, variantesDeGestion } from './consultas.js';
 import { StockService } from './stock.service.js';
-import { codigoDeUbicacion, codigosDeVariante, esUbicacion } from './ubicaciones.js';
+import { codigoDeUbicacion, codigosDeVariante, esUbicacion, leerCodigoDeUbicacion } from './ubicaciones.js';
 
 const LARGO_MAXIMO_ESTAMPADO = 60;
 
@@ -120,7 +120,7 @@ export class ProductosService {
    */
   editarVariante(idVariante: number, cuerpo: unknown): Promise<VarianteStock> {
     const datos = cuerpoComo<VarianteEdicionRequest>(cuerpo);
-    const campos: (keyof VarianteEdicionRequest)[] = ['nombre', 'categoria', 'banda', 'talla', 'color', 'imagen'];
+    const campos: (keyof VarianteEdicionRequest)[] = ['nombre', 'categoria', 'banda', 'talla', 'color', 'imagen', 'espacio'];
     exigir(campos.some((campo) => datos[campo] !== undefined), 'No hay cambios que aplicar.');
 
     return this.db.transaccion(async (tx) => {
@@ -160,17 +160,22 @@ export class ProductosService {
         exigir(texto(datos.categoria) !== '', 'La categoría es obligatoria.');
         const categoria = await this.catalogos.incorporarCategoria(tx, datos.categoria);
         if (categoria.id !== idCategoria) {
-          // Cada categoría tiene su zona en la bodega: el producto pasa a un espacio nuevo de esa zona.
-          const [lugar] = await tx.consultar<{ zona: string; posicion: number }>(
-            `UPDATE inventario.categorias SET ultima_posicion = ultima_posicion + 1
-             WHERE id_categoria = $1 RETURNING zona, ultima_posicion AS posicion`,
-            [categoria.id],
-          );
-          await tx.consultar('UPDATE inventario.productos SET id_categoria = $2, codigo_ubicacion = $3 WHERE id_producto = $1', [
-            idProducto,
-            categoria.id,
-            codigoDeUbicacion(lugar!.zona, lugar!.posicion),
-          ]);
+          if (datos.espacio === undefined) {
+            // Cada categoría tiene su zona en la bodega: el producto pasa a un espacio nuevo de esa zona.
+            const [lugar] = await tx.consultar<{ zona: string; posicion: number }>(
+              `UPDATE inventario.categorias SET ultima_posicion = ultima_posicion + 1
+               WHERE id_categoria = $1 RETURNING zona, ultima_posicion AS posicion`,
+              [categoria.id],
+            );
+            await tx.consultar('UPDATE inventario.productos SET id_categoria = $2, codigo_ubicacion = $3 WHERE id_producto = $1', [
+              idProducto,
+              categoria.id,
+              codigoDeUbicacion(lugar!.zona, lugar!.posicion),
+            ]);
+          } else {
+            // El espacio pedido, más abajo, reemplaza al que se le asignaría en la zona nueva.
+            await tx.consultar('UPDATE inventario.productos SET id_categoria = $2 WHERE id_producto = $1', [idProducto, categoria.id]);
+          }
           // Las tallas que ya tiene el producto pasan a ser tallas de su categoría nueva.
           const tallas = await tx.consultar<{ id_talla: number }>('SELECT DISTINCT id_talla FROM inventario.variantes WHERE id_producto = $1', [idProducto]);
           for (const { id_talla: idTalla } of tallas) {
@@ -179,6 +184,10 @@ export class ProductosService {
           idCategoria = categoria.id;
           usaBanda = categoria.usaBanda;
         }
+      }
+
+      if (datos.espacio !== undefined) {
+        await this.moverAEspacio(tx, idProducto, idCategoria, datos.espacio);
       }
 
       if (!usaBanda) {
@@ -213,6 +222,32 @@ export class ProductosService {
 
       return (await variantesConStock(tx, 'WHERE v.id_variante = $1', [idVariante]))[0]!;
     });
+  }
+
+  /**
+   * Guarda el producto, con todas sus tallas y colores, en otro espacio de la zona de su
+   * categoría. El espacio puede guardar ya otros productos, o ser uno que aún no se usa.
+   */
+  private async moverAEspacio(tx: Ejecutor, idProducto: number, idCategoria: number, espacio: unknown): Promise<void> {
+    const lugar = typeof espacio === 'string' ? leerCodigoDeUbicacion(espacio) : null;
+    exigir(lugar !== null, 'El espacio no es válido: debe tener la forma B-POL-03.');
+    const [categoria] = await tx.consultar<{ nombre: string; zona: string }>(
+      'SELECT nombre, zona FROM inventario.categorias WHERE id_categoria = $1',
+      [idCategoria],
+    );
+    exigir(
+      lugar.zona === categoria!.zona,
+      `Los productos de ${categoria!.nombre} se guardan en los espacios B-${categoria!.zona}: no en la zona ${lugar.zona}.`,
+    );
+    await tx.consultar('UPDATE inventario.productos SET codigo_ubicacion = $2 WHERE id_producto = $1', [
+      idProducto,
+      codigoDeUbicacion(lugar.zona, lugar.posicion),
+    ]);
+    // Un espacio nuevo más allá del último asignado no se le vuelve a dar a un producto recién creado.
+    await tx.consultar('UPDATE inventario.categorias SET ultima_posicion = GREATEST(ultima_posicion, $2) WHERE id_categoria = $1', [
+      idCategoria,
+      lugar.posicion,
+    ]);
   }
 
   crear(cuerpo: unknown, usuario: Usuario): Promise<VarianteStock> {

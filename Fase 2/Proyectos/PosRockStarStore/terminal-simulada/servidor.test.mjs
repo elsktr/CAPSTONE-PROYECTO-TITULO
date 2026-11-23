@@ -70,6 +70,27 @@ test('rechazo con motivo y cancelacion desde la caja', async () => {
   assert.equal((await pedir('GET', '/api/cobros/actual')).cuerpo, null);
 });
 
+test('responde los codigos de Mercado Pago Point: aprobado, cada rechazo, cancelado en la maquina y sin respuesta', async () => {
+  const codigos = (await pedir('GET', '/api/codigos')).cuerpo;
+  assert.ok(codigos.some((c) => c.codigo === 'insufficient_amount' && c.motivo === 'Fondos insuficientes.'));
+
+  const resultado = async (accion, cuerpo) => {
+    const { cuerpo: cobro } = await pedir('POST', '/api/cobros', { monto: 1000, tipo: 'DEBITO' });
+    return (await pedir('POST', `/api/cobros/${cobro.id}/${accion}`, cuerpo)).cuerpo;
+  };
+  assert.equal((await resultado('aprobar')).codigo, 'accredited');
+  for (const { codigo, motivo } of codigos) {
+    const rechazado = await resultado('rechazar', { codigo });
+    assert.deepEqual([rechazado.estado, rechazado.codigo, rechazado.motivo], ['RECHAZADO', codigo, motivo]);
+  }
+  const enMaquina = await resultado('cancelar-en-maquina');
+  assert.deepEqual([enMaquina.estado, enMaquina.codigo, enMaquina.motivo], ['CANCELADO', 'canceled_on_terminal', 'Se canceló en la máquina.']);
+  const sinRespuesta = await resultado('sin-respuesta');
+  assert.deepEqual([sinRespuesta.estado, sinRespuesta.codigo], ['REVISAR', 'check_on_terminal']);
+  // Un codigo desconocido queda como un rechazo generico del emisor.
+  assert.equal((await resultado('rechazar', { codigo: 'inventado' })).codigo, 'rejected_other_reason');
+});
+
 test('valida el monto y el tipo', async () => {
   assert.equal((await pedir('POST', '/api/cobros', { monto: 0, tipo: 'DEBITO' })).estado, 400);
   assert.equal((await pedir('POST', '/api/cobros', { monto: 10.5, tipo: 'DEBITO' })).estado, 400);
@@ -89,7 +110,8 @@ test('un cobro sin pagar expira', async () => {
     await new Promise((r) => setTimeout(r, 80));
     const cobro = await (await fetch(`${url}/api/cobros/${id}`)).json();
     assert.equal(cobro.estado, 'CANCELADO');
-    assert.equal(cobro.motivo, 'Tiempo agotado en la máquina');
+    assert.equal(cobro.codigo, 'expired');
+    assert.equal(cobro.motivo, 'Se acabó el tiempo para pagar en la máquina.');
   } finally {
     corto.close();
   }

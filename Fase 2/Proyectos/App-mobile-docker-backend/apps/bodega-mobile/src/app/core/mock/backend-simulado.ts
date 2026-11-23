@@ -113,6 +113,20 @@ class AsignadorDeUbicaciones {
     return `B-${zona}-${String(posicion).padStart(2, '0')}`;
   }
 
+  /**
+   * Espacio pedido para un producto de la categoría, que puede compartir con otros. Valida
+   * que sea de su zona y reserva su número, para no dárselo después a un producto nuevo.
+   */
+  elegido(categoria: string, codigo: unknown): string {
+    const partes = typeof codigo === 'string' ? /^B-([A-Z0-9]+)-(\d{1,4})$/.exec(codigo.trim().toUpperCase()) : null;
+    exigir(partes !== null && Number(partes[2]) > 0, 'El espacio no es válido: debe tener la forma B-POL-03.');
+    const zona = this.zonaDe(categoria);
+    exigir(partes[1] === zona, `Los productos de ${categoria} se guardan en los espacios B-${zona}: no en la zona ${partes[1]}.`);
+    const posicion = Number(partes[2]);
+    this.posiciones.set(zona, Math.max(this.posiciones.get(zona) ?? 0, posicion));
+    return `B-${zona}-${String(posicion).padStart(2, '0')}`;
+  }
+
   private zonaDe(categoria: string): string {
     const clave = soloLetras(categoria);
     let zona = this.zonas.get(clave);
@@ -575,7 +589,7 @@ export class BackendSimulado {
     if (!variante) {
       throw new ErrorSimulado(404, 'NO_ENCONTRADO', 'La variante no existe.');
     }
-    const campos = ['nombre', 'categoria', 'banda', 'talla', 'color', 'imagen'] as const;
+    const campos = ['nombre', 'categoria', 'banda', 'talla', 'color', 'imagen', 'espacio'] as const;
     exigir(campos.some((campo) => datos[campo] !== undefined), 'No hay cambios que aplicar.');
     const delProducto = this.variantes.filter((v) => v.producto === variante.producto);
 
@@ -595,10 +609,14 @@ export class BackendSimulado {
     }
 
     const categoria = this.incorporarCategoria(datos.categoria === undefined ? variante.categoria : datos.categoria);
-    // Cada categoría tiene su zona en la bodega: al cambiarla, el producto pasa a un espacio nuevo de esa zona.
-    const codigoUbicacion = mismoTexto(categoria.nombre, variante.categoria)
-      ? variante.codigoUbicacion
-      : this.ubicaciones.siguiente(categoria.nombre);
+    // Cada categoría tiene su zona en la bodega: al cambiarla, el producto pasa a un espacio nuevo
+    // de esa zona, salvo que se pida uno, que puede guardar ya otros productos.
+    const codigoUbicacion =
+      datos.espacio !== undefined
+        ? this.ubicaciones.elegido(categoria.nombre, datos.espacio)
+        : mismoTexto(categoria.nombre, variante.categoria)
+          ? variante.codigoUbicacion
+          : this.ubicaciones.siguiente(categoria.nombre);
     // Las categorías sin banda, como los pantalones, no la conservan ni la aceptan.
     let banda = categoria.usaBanda ? variante.banda : null;
     if (categoria.usaBanda && datos.banda !== undefined) {
