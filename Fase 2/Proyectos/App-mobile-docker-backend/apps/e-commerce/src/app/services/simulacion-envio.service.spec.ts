@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+import 'zone.js';
 import '@angular/compiler';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { BrowserTestingModule, platformBrowserTesting } from '@angular/platform-browser/testing';
+import { BrowserDynamicTestingModule, platformBrowserDynamicTesting } from '@angular/platform-browser-dynamic/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { API_URL } from '../core/api';
@@ -11,7 +12,7 @@ import { CartService } from './cart.service';
 import { type Product } from '../data/models';
 import { SimulacionEnvioService } from './simulacion-envio.service';
 
-TestBed.initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
+TestBed.initTestEnvironment(BrowserDynamicTestingModule, platformBrowserDynamicTesting());
 
 const COTIZAR_URL = `${API_URL}/logistica/fletes/cotizar`;
 const COMUNAS_URL = `${API_URL}/logistica/comunas?region=7`;
